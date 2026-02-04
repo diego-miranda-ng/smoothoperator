@@ -13,10 +13,27 @@
                     "GOPATH": "/go"
                 },
                 "go.useLanguageServer": true,
-                "go.gopath": "/go"
+                "go.gopath": "/go",
+                "go.delveConfig": {
+                    "debugAdapter": "dlv-dap",
+                    "dlvLoadConfig": {
+                        "followPointers": true,
+                        "maxVariableRecurse": 1,
+                        "maxStringLen": 64,
+                        "maxArrayValues": 64,
+                        "maxStructFields": -1
+                    },
+                    "apiVersion": 2,
+                    "showGlobalVariables": false
+                },
+                "go.enableCodeLens": {
+                    "references": true,
+                    "runtest": true
+                },
+                "go.testCodeLens": true
             }
         }
     },
-    "postCreateCommand": "go install golang.org/x/tools/gopls@v0.14.2",
+    "postCreateCommand": "go install golang.org/x/tools/gopls@latest",
     "postStartCommand": "go install golang.org/x/tools/cmd/goimports@latest"
 } 

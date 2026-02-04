@@ -5,8 +5,7 @@
     },
     "go.gopath": "/go",
     "go.alternateTools": {
-        "go": "docker-compose exec app go",
-        "gopls": "/go/bin/gopls"
+        "go": "docker-compose exec app go"
     },
     "go.languageServerFlags": [
         "-rpc.trace",
@@ -29,5 +28,22 @@
     "go.coverOnSingleTest": true,
     "go.coverOnSingleTestFile": true,
     "go.coverShowCounts": true,
-    "dev.containers.autoStart": true
+    "dev.containers.autoStart": true,
+    "go.delveConfig": {
+        "debugAdapter": "dlv-dap",
+        "dlvLoadConfig": {
+            "followPointers": true,
+            "maxVariableRecurse": 1,
+            "maxStringLen": 64,
+            "maxArrayValues": 64,
+            "maxStructFields": -1
+        },
+        "apiVersion": 2,
+        "showGlobalVariables": false
+    },
+    "go.enableCodeLens": {
+        "references": true,
+        "runtest": true
+    },
+    "go.testCodeLens": true
 } 

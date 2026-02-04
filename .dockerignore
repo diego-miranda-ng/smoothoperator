@@ -1,0 +1,22 @@
+# Git
+.git
+.gitignore
+
+# IDE and editor
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Build output and temp
+tmp/
+*.exe
+*.test
+*.out
+
+# Coverage and env
+coverage.out
+coverage.html
+.env
+.env.local
