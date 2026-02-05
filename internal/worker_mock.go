@@ -3,74 +3,44 @@ package internal
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 	"workermanager"
 )
 
-type workerMock struct {
-	name      string
-	status    workermanager.Status
-	ctx       context.Context
-	ctxCancel context.CancelFunc
-	stopChan  chan struct{}
-	mu        sync.Mutex
+// handlerMock is a Handler implementation for testing.
+type handlerMock struct {
+	name string
 }
 
-func NewWorker(name string) workermanager.Worker {
-	return &workerMock{
-		name:     name,
-		status:   workermanager.StatusStopped,
-		stopChan: make(chan struct{}),
-		mu:       sync.Mutex{},
+// NewHandler returns a Handler that logs and simulates work each Handle call.
+func NewHandler(name string) workermanager.Handler {
+	return &handlerMock{name: name}
+}
+
+func (h *handlerMock) Handle(ctx context.Context) {
+	fmt.Println("worker", h.name, " is working")
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+		// one unit of work simulated
 	}
 }
 
-func (w *workerMock) Name() string {
-	return w.name
+// QuickHandler returns a Handler that yields quickly (for tests). Handle exits
+// after a short delay or on ctx.Done(), so Stop() completes fast.
+func QuickHandler(name string) workermanager.Handler {
+	return &quickHandler{name: name}
 }
 
-func (w *workerMock) Status() workermanager.Status {
-	return w.status
+type quickHandler struct {
+	name string
 }
 
-func (w *workerMock) Start(ctx context.Context) error {
-	w.ctx, w.ctxCancel = context.WithCancel(ctx)
-
-	go w.goRoutine()
-
-	return nil
-}
-
-func (w *workerMock) Stop(ctx context.Context) chan struct{} {
-	w.ctxCancel()
-	return w.stopChan
-}
-
-func (w *workerMock) goRoutine() {
-	defer func() {
-		fmt.Println("worker", w.Name(), "is stopping")
-		w.setStatus(workermanager.StatusStopped)
-		close(w.stopChan)
-	}()
-
-	w.setStatus(workermanager.StatusRunning)
-
-	for {
-		select {
-		case <-w.ctx.Done():
-			fmt.Println("worker", w.Name(), "context is done")
-			return
-		default:
-			fmt.Println("worker", w.Name(), " is working")
-			time.Sleep(5 * time.Second)
-		}
+func (h *quickHandler) Handle(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(10 * time.Millisecond):
 	}
-}
-
-func (w *workerMock) setStatus(status workermanager.Status) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.status = status
 }

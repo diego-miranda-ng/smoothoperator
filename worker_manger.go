@@ -7,7 +7,7 @@ import (
 )
 
 type WorkManager interface {
-	AddWorker(worker Worker) error
+	AddHandler(name string, handler Handler) (*Worker, error)
 	Start(name string) error
 	StartAll() error
 	Stop(name string) (chan struct{}, error)
@@ -16,29 +16,30 @@ type WorkManager interface {
 
 type workerManager struct {
 	ctx     context.Context
-	workers map[string]Worker
+	workers map[string]*Worker
 	mu      sync.RWMutex
 }
 
 func NewWorkerManager(ctx context.Context) WorkManager {
 	return &workerManager{
 		ctx:     ctx,
-		workers: make(map[string]Worker),
+		workers: make(map[string]*Worker),
 		mu:      sync.RWMutex{},
 	}
 }
 
-func (wm *workerManager) AddWorker(worker Worker) error {
+func (wm *workerManager) AddHandler(name string, handler Handler) (*Worker, error) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
-	if _, ok := wm.workers[worker.Name()]; ok {
-		return fmt.Errorf("worker %s already exists", worker.Name())
+	if _, ok := wm.workers[name]; ok {
+		return nil, fmt.Errorf("worker %s already exists", name)
 	}
 
-	wm.workers[worker.Name()] = worker
+	worker := NewWorker(name, handler)
+	wm.workers[name] = worker
 
-	return nil
+	return worker, nil
 }
 
 func (wm *workerManager) Start(name string) error {
@@ -58,9 +59,10 @@ func (wm *workerManager) StartAll() error {
 	defer wm.mu.RUnlock()
 
 	for _, worker := range wm.workers {
-		worker.Start(wm.ctx)
+		if err := wm.Start(worker.Name()); err != nil {
+			return err
+		}
 	}
-
 	return nil
 }
 
@@ -80,18 +82,13 @@ func (wm *workerManager) StopAll() chan struct{} {
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
 
-	stop := make(chan struct{})
-	defer close(stop)
-
-	wg := sync.WaitGroup{}
 	for _, worker := range wm.workers {
-		wg.Add(1)
-		go func(worker Worker) {
-			<-worker.Stop(context.Background())
-			wg.Done()
-		}(worker)
+		if stopChan, _ := wm.Stop(worker.Name()); stopChan != nil {
+			<-stopChan
+		}
 	}
-	wg.Wait()
 
-	return stop
+	stopped := make(chan struct{})
+	close(stopped)
+	return stopped
 }
