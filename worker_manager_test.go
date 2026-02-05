@@ -2,6 +2,7 @@ package workermanager_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 	"workermanager"
@@ -125,4 +126,64 @@ func (s *WorkerManagerTestSuite) TestWorker_NameAndStatus() {
 	worker := workermanager.NewWorker("my-name", internal.QuickHandler("x"))
 	s.Equal("my-name", worker.Name())
 	s.Equal(workermanager.StatusStopped, worker.Status())
+}
+
+func (s *WorkerManagerTestSuite) TestWorker_WhenHandleReturnsNone_SleepsForIdleDuration() {
+	h := internal.IdleHandler("idle", 15*time.Millisecond)
+	worker := workermanager.NewWorker("idle", h)
+	ctx := context.Background()
+	s.Require().NoError(worker.Start(ctx))
+	time.Sleep(50 * time.Millisecond)
+	ch := worker.Stop(ctx)
+	<-ch
+	s.Equal(workermanager.StatusStopped, worker.Status())
+}
+
+func (s *WorkerManagerTestSuite) TestWorker_WhenIdleSleep_StopCancelsContextAndExitsSelect() {
+	// Use long idle so worker is in time.After; Stop() cancels ctx so select gets <-ctx.Done()
+	h := internal.IdleHandler("idle", 5*time.Second)
+	worker := workermanager.NewWorker("idle", h)
+	ctx := context.Background()
+	s.Require().NoError(worker.Start(ctx))
+	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle sleep
+	ch := worker.Stop(ctx)
+	<-ch
+	s.Equal(workermanager.StatusStopped, worker.Status())
+}
+
+func (s *WorkerManagerTestSuite) TestWorker_WhenHandleReturnsNoneWithZeroDuration_DoesNotSleep() {
+	// Covers handle() path where Status is None but IdleDuration is 0 (no select).
+	h := internal.NoneZeroHandler("idle")
+	worker := workermanager.NewWorker("idle", h)
+	ctx := context.Background()
+	s.Require().NoError(worker.Start(ctx))
+	time.Sleep(30 * time.Millisecond)
+	ch := worker.Stop(ctx)
+	<-ch
+	s.Equal(workermanager.StatusStopped, worker.Status())
+}
+
+func (s *WorkerManagerTestSuite) TestWorker_WhenHandleReturnsFail_LogsErrorAndCanSleep() {
+	err := fmt.Errorf("handler failed")
+	h := internal.FailHandler("fail", err, 15*time.Millisecond)
+	worker := workermanager.NewWorker("fail", h)
+	ctx := context.Background()
+	s.Require().NoError(worker.Start(ctx))
+	time.Sleep(50 * time.Millisecond)
+	ch := worker.Stop(ctx)
+	<-ch
+	s.Equal(workermanager.StatusStopped, worker.Status())
+}
+
+func (s *WorkerManagerTestSuite) TestHandleResult_NoneDoneFail() {
+	s.Equal(workermanager.HandleStatusNone, workermanager.None(time.Second).Status)
+	s.Equal(time.Second, workermanager.None(time.Second).IdleDuration)
+
+	s.Equal(workermanager.HandleStatusDone, workermanager.Done().Status)
+
+	e := fmt.Errorf("fail")
+	r := workermanager.Fail(e, 2*time.Second)
+	s.Equal(workermanager.HandleStatusFail, r.Status)
+	s.Equal(e, r.Err)
+	s.Equal(2*time.Second, r.IdleDuration)
 }

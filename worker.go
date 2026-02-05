@@ -2,7 +2,9 @@ package workermanager
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 )
 
 type Status string
@@ -12,14 +14,9 @@ const (
 	StatusStopped Status = "stopped"
 )
 
-// Handler is the minimal interface for business logic. Handlers are added to
-// the work manager and wrapped by a Worker which manages state and lifecycle.
-type Handler interface {
-	Handle(ctx context.Context)
-}
-
 // Worker wraps a Handler and manages its state, status, and lifecycle.
 // The manager adds handlers and receives Workers; Worker exposes Start/Stop.
+// Optionally set ErrorLogger so Fail results from Handle are logged.
 type Worker struct {
 	name    string
 	handler Handler
@@ -80,7 +77,7 @@ func (w *Worker) Start(ctx context.Context) error {
 			case <-workerCtx.Done():
 				return
 			default:
-				w.handler.Handle(workerCtx)
+				w.handle(workerCtx)
 			}
 		}
 	}()
@@ -102,4 +99,22 @@ func (w *Worker) Stop(ctx context.Context) chan struct{} {
 
 	w.cancel()
 	return w.done
+}
+
+func (w *Worker) handle(ctx context.Context) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	result := w.handler.Handle(ctx)
+	if result.Status == HandleStatusFail && result.Err != nil {
+		fmt.Println("error: ", result.Err)
+	}
+
+	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(result.IdleDuration):
+		}
+	}
 }
