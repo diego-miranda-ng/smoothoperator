@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"workermanager"
+	"github.com/diego-miranda-ng/smoothoperator"
 )
 
 // handlerMock is a Handler implementation for testing.

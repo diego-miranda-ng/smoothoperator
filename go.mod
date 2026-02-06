@@ -1,4 +1,4 @@
-module workermanager
+module github.com/diego-miranda-ng/smoothoperator
 
 go 1.25
 

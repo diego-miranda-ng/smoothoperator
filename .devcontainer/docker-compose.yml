@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/app
+    command: sleep infinity
+    # Keep container running for dev
+    stdin_open: true
+    tty: true

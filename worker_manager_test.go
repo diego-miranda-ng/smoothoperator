@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"testing"
 	"time"
-	"workermanager"
-	"workermanager/internal"
+
+	workermanager "github.com/diego-miranda-ng/smoothoperator"
+	"github.com/diego-miranda-ng/smoothoperator/internal"
 
 	"github.com/stretchr/testify/suite"
 )

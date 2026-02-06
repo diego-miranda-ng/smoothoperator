@@ -38,8 +38,3 @@ Thumbs.db
 # Coverage files
 coverage.out
 coverage.html
-
-# Local dev container, example app, and scripts
-.devcontainer/
-cmd/
-scripts/

@@ -1,0 +1,77 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Tests",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "GOPATH": "/go"
+      },
+      "args": ["-test.v"],
+      "showLog": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug Test",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${file}",
+      "env": {},
+      "args": ["-test.v", "-test.run", "^${selectedText}$"],
+      "showLog": true
+    },
+    {
+      "name": "Debug Current Test",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${fileDirname}",
+      "env": {},
+      "args": ["-test.v", "-test.run", "^${selectedText}$"],
+      "showLog": true
+    },
+    {
+      "name": "Debug All Tests",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}",
+      "env": {},
+      "args": ["-test.v"],
+      "showLog": true
+    },
+    {
+      "name": "Debug Test File",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${fileDirname}",
+      "env": {},
+      "args": ["-test.v"],
+      "showLog": true
+    },
+    {
+      "name": "Attach to Process",
+      "type": "go",
+      "request": "attach",
+      "mode": "local",
+      "processId": 0,
+      "showLog": true
+    },
+    {
+      "name": "Debug Remote (Delve)",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "remotePath": "${workspaceFolder}",
+      "port": 2345,
+      "host": "localhost",
+      "showLog": true
+    }
+  ]
+}
