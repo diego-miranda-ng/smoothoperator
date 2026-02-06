@@ -1,6 +1,6 @@
 {
   "name": "Go Development",
-  "dockerComposeFile": ["../docker-compose.yml"],
+  "dockerComposeFile": ["docker-compose.yml"],
   "service": "app",
   "workspaceFolder": "/app",
   "forwardPorts": [2345],
