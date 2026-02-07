@@ -4,6 +4,7 @@
   "service": "app",
   "workspaceFolder": "/app",
   "forwardPorts": [2345],
+  "containerEnv": {"GOTOOLCHAIN": "auto"},
   "customizations": {
     "vscode": {
       "extensions": ["golang.go"],

@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Run Tests",
+      "label": "Run Application",
       "type": "shell",
-      "command": "go test ./...",
+      "command": "go run ./cmd/example",
       "options": {
         "cwd": "${workspaceFolder}",
         "env": {
@@ -12,7 +12,7 @@
         }
       },
       "group": {
-        "kind": "test",
+        "kind": "run",
         "isDefault": true
       },
       "presentation": {
@@ -20,12 +20,12 @@
         "panel": "dedicated",
         "focus": true
       },
-      "problemMatcher": ["$go"]
+      "problemMatcher": []
     },
     {
-      "label": "Build",
+      "label": "Build Application",
       "type": "shell",
-      "command": "go build ./...",
+      "command": "go build -o ${workspaceFolder}/tmp/main ./cmd/example",
       "options": {
         "cwd": "${workspaceFolder}"
       },

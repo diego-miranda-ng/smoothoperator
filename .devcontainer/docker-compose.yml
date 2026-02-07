@@ -4,8 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ..:/app
+      - ..:/app:cached
+    working_dir: /app
+    # Override default command so the container stays running
     command: sleep infinity
-    # Keep container running for dev
-    stdin_open: true
-    tty: true

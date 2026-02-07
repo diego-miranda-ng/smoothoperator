@@ -2,16 +2,28 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Tests",
+      "name": "Launch Application",
       "type": "go",
       "request": "launch",
-      "mode": "test",
-      "program": "${workspaceFolder}",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/example",
       "cwd": "${workspaceFolder}",
       "env": {
         "GOPATH": "/go"
       },
-      "args": ["-test.v"],
+      "showLog": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Launch Application (auto)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/example",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "GOPATH": "/go"
+      },
       "showLog": true,
       "console": "integratedTerminal"
     },
