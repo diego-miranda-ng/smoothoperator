@@ -104,3 +104,16 @@ func (h *noneZeroHandler) Handle(ctx context.Context) smoothoperator.HandleResul
 		return smoothoperator.None(0)
 	}
 }
+
+// PanicHandler returns a Handler that panics on every Handle call. Used to test panic recovery.
+func PanicHandler(name string) smoothoperator.Handler {
+	return &panicHandler{name: name}
+}
+
+type panicHandler struct {
+	name string
+}
+
+func (h *panicHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+	panic("panic from handler: " + h.name)
+}

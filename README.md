@@ -26,7 +26,7 @@ func main() {
 
     op := smoothoperator.NewOperator(ctx)
 
-    op.AddHandler("my-worker", myHandler{})
+    _ = op.AddHandler("my-worker", myHandler{}, smoothoperator.Config{})
     op.StartAll()
 
     // ... run until shutdown ...
@@ -43,7 +43,7 @@ func (myHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
 ```
 
 - **`Handler`** implements `Handle(ctx) HandleResult`. Return `Done()`, `None(idleDuration)`, or `Fail(err, idleDuration)`.
-- **`NewOperator(ctx)`** creates an operator. Use `AddHandler(name, handler)`, then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown.
+- **`NewOperator(ctx)`** creates an operator. Use `AddHandler(name, handler, config)` (returns `error`), then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown. Use `Status(name)` to get a worker’s status. Pass `Config{}` for defaults, or set `Config{MaxPanicAttempts: n}` to stop a worker after n panic recoveries.
 
 ## Documentation
 

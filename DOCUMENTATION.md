@@ -11,7 +11,7 @@ This document describes all exported types and methods of the `smoothoperator` p
 
 1. [Overview](#overview)
 2. [Operator](#operator)
-3. [Worker](#worker)
+3. [Workers (internal)](#workers-internal)
 4. [Handler and HandleResult](#handler-and-handleresult)
 5. [Constants and types](#constants-and-types)
 6. [Usage examples](#usage-examples)
@@ -23,7 +23,7 @@ This document describes all exported types and methods of the `smoothoperator` p
 The package provides a worker-pool abstraction:
 
 - **Operator**: Registers named handlers, starts and stops workers individually or all at once.
-- **Worker**: A single runnable unit that wraps a `Handler` and runs it in a loop until stopped.
+- **Workers**: Created and managed by the Operator by name; not exposed to callers.
 - **Handler**: Interface with a single method `Handle(ctx) HandleResult` (None / Done / Fail).
 - **HandleResult**: Constructors `None`, `Done`, and `Fail` describe the outcome of each `Handle` call and control idle/retry behavior.
 
@@ -39,13 +39,25 @@ The **Operator** manages a set of named workers. You register handlers, then sta
 
 ```go
 type Operator interface {
-    AddHandler(name string, handler Handler) (*Worker, error)
+    AddHandler(name string, handler Handler, config Config) error
     Start(name string) error
     StartAll() error
     Stop(name string) (chan struct{}, error)
     StopAll() chan struct{}
+    Status(name string) (Status, error)
 }
 ```
+
+### Config
+
+```go
+type Config struct {
+    MaxPanicAttempts int           // max panic recoveries before worker stops; 0 = no limit
+    PanicBackoff     time.Duration // sleep after recovering a panic; 0 = 1s default
+}
+```
+
+`Config` is passed to `AddHandler` to configure the worker. Use a zero value `Config{}` for defaults.
 
 ### Constructor
 
@@ -60,16 +72,15 @@ Creates an Operator that uses `ctx` for worker lifecycle. Workers started via th
 
 ### Methods
 
-#### `AddHandler(name string, handler Handler) (*Worker, error)`
+#### `AddHandler(name string, handler Handler, config Config) error`
 
-Registers a handler under the given name and returns the corresponding `Worker`. The worker is not started; call `Start` or `StartAll` to run it.
+Registers a handler under the given name with the given config. The worker is not started; call `Start` or `StartAll` to run it. Workers are not exposed; use `Status(name)` to query state.
 
 - **Parameters:**
   - `name` – unique identifier for this worker.
   - `handler` – implementation of `Handler` to run.
-- **Returns:**
-  - `*Worker` – the worker that wraps `handler`.
-  - `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
+  - `config` – worker config (e.g. `MaxPanicAttempts`); use `Config{}` for defaults.
+- **Returns:** `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
 
 ---
 
@@ -113,68 +124,28 @@ Typical usage: `<-op.StopAll()` to block until every worker has stopped.
 
 ---
 
-## Worker
+#### `Status(name string) (Status, error)`
 
-A **Worker** wraps a `Handler` and runs it in a loop in a single goroutine until stopped. It exposes name, status, and lifecycle methods.
+Returns the current status of the worker with the given name (`StatusRunning` or `StatusStopped`).
 
-### Type
-
-```go
-type Worker struct {
-    // name, handler, status, mu, cancel, done (unexported)
-}
-```
-
-Use **NewWorker** to create a `*Worker`; the struct fields are not intended for direct access.
-
-### Constructor
-
-#### `NewWorker(name string, handler Handler) *Worker`
-
-Creates a Worker that will run `handler` under the given `name`. The worker starts in `StatusStopped`; call `Start` to run it.
-
-- **Parameters:**
-  - `name` – identifier for this worker (e.g. for logging or Operator lookup).
-  - `handler` – the `Handler` to run in a loop.
-- **Returns:** `*Worker` – always non-nil.
+- **Parameters:** `name` – the name used when the worker was registered.
+- **Returns:**
+  - `Status` – current state of the worker.
+  - `error` – non-nil if no worker is registered under `name` (e.g. `"worker <name> not found"`).
 
 ---
 
-### Methods
+## Workers (internal)
 
-#### `Name() string`
+Workers are not exposed by the package. The **Operator** creates and manages them by name. If a handler’s `Handle` panics, the worker recovers, logs the panic, sleeps for a short backoff, then continues the loop so the goroutine does not exit and `Stop` can complete normally.
 
-Returns the name assigned to this worker when it was created.
+### Panic recovery and max attempts
 
-- **Returns:** the worker’s name string.
+If a handler’s `Handle` method panics, the worker recovers inside the loop. The panic value is converted to an error and logged (via the standard `log` package), the panic count is incremented, then the worker sleeps for a fixed backoff (one second) before calling `Handle` again. Context cancellation is respected during this sleep, so `Stop` still causes the worker to exit promptly.
 
----
+You can set a maximum number of panic recoveries by passing **Config{MaxPanicAttempts: n}** to `AddHandler`. When the count reaches that limit, the worker logs that the limit was reached, cancels its own context, and exits. Use `0` (the default) for no limit.
 
-#### `Status() Status`
-
-Returns the current worker status: `StatusRunning` or `StatusStopped`. Safe to call from any goroutine.
-
-- **Returns:** `Status` – current lifecycle state.
-
----
-
-#### `Start(ctx context.Context) error`
-
-Starts the worker loop in a new goroutine. The loop runs until `ctx` is cancelled (e.g. by calling `Stop`). Idempotent: if the worker is already running, `Start` returns `nil` without starting a second loop.
-
-- **Parameters:** `ctx` – context used for the worker loop; cancellation stops the loop.
-- **Returns:** `error` – always `nil` in the current implementation (idempotent when already running).
-
----
-
-#### `Stop(ctx context.Context) chan struct{}`
-
-Cancels the worker’s context and returns a channel that closes when the worker goroutine has fully exited. If the worker was never started, returns an already-closed channel immediately. The `ctx` parameter is accepted for API consistency but cancellation is driven by the context passed to `Start`.
-
-- **Parameters:** `ctx` – not used for cancellation; can be `context.Background()`.
-- **Returns:** `chan struct{}` – closes when the worker has stopped; never nil.
-
-Typical usage: `<-worker.Stop(ctx)` to block until the worker has stopped.
+Handle errors (when the handler returns `Fail` with a non-nil `Err`) are also logged with the standard `log` package.
 
 ---
 
@@ -279,8 +250,7 @@ const (
 ctx := context.Background()
 op := smoothoperator.NewOperator(ctx)
 
-worker, err := op.AddHandler("my-worker", myHandler)
-if err != nil {
+if err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{}); err != nil {
     log.Fatal(err)
 }
 if err := op.Start("my-worker"); err != nil {
@@ -299,8 +269,8 @@ if err != nil {
 
 ```go
 op := smoothoperator.NewOperator(ctx)
-op.AddHandler("a", handlerA)
-op.AddHandler("b", handlerB)
+op.AddHandler("a", handlerA, smoothoperator.Config{})
+op.AddHandler("b", handlerB, smoothoperator.Config{})
 op.StartAll()
 // ...
 <-op.StopAll()
@@ -320,15 +290,6 @@ func (h *MyHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
     h.process(job)
     return smoothoperator.Done()
 }
-```
-
-### Direct Worker use (without Operator)
-
-```go
-worker := smoothoperator.NewWorker("standalone", myHandler)
-worker.Start(ctx)
-// ...
-<-worker.Stop(context.Background())
 ```
 
 ---
