@@ -301,6 +301,74 @@ func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	require.Equal(t, smoothoperator.StatusStopped, status, "worker should stop itself after max panic attempts")
 }
 
+func TestRemoveHandler_WhenWorkerRunning_ShouldStopAndRemoveWorker(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{}))
+	require.NoError(t, op.Start("worker-1"))
+	time.Sleep(20 * time.Millisecond)
+
+	// Act
+	err := op.RemoveHandler("worker-1")
+
+	// Assert
+	require.NoError(t, err)
+	_, statusErr := op.Status("worker-1")
+	require.Error(t, statusErr)
+	require.Contains(t, statusErr.Error(), "not found")
+}
+
+func TestRemoveHandler_WhenWorkerStopped_ShouldRemoveWorker(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{}))
+
+	// Act
+	err := op.RemoveHandler("worker-1")
+
+	// Assert
+	require.NoError(t, err)
+	_, statusErr := op.Status("worker-1")
+	require.Error(t, statusErr)
+	require.Contains(t, statusErr.Error(), "not found")
+}
+
+func TestRemoveHandler_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+
+	// Act
+	err := op.RemoveHandler("missing")
+
+	// Assert
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestRemoveHandler_WhenWorkerRemoved_ShouldAllowReAddingSameName(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{}))
+	require.NoError(t, op.RemoveHandler("worker-1"))
+
+	// Act: re-register with the same name
+	err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
+
+	// Assert
+	require.NoError(t, err)
+	status, statusErr := op.Status("worker-1")
+	require.NoError(t, statusErr)
+	require.Equal(t, smoothoperator.StatusStopped, status)
+}
+
 func TestStatus_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
