@@ -9,24 +9,18 @@ import (
 	workermanager "github.com/diego-miranda-ng/smoothoperator"
 	"github.com/diego-miranda-ng/smoothoperator/internal"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/require"
 )
 
-type WorkerManagerTestSuite struct {
-	suite.Suite
-}
+func TestStopAll_WhenMultipleWorkersRunning_ShouldWaitAllWorkersToStop(t *testing.T) {
+	t.Parallel()
 
-func TestWorkerManager(t *testing.T) {
-	suite.Run(t, new(WorkerManagerTestSuite))
-}
-
-func (s *WorkerManagerTestSuite) TestStopAll_ShouldWaitAllWorkersToStop() {
 	// Arrange
 	wm := workermanager.NewWorkerManager(context.Background())
 	var workers []*workermanager.Worker
 	for _, name := range []string{"worker-1", "worker-2", "worker-3", "worker-4", "worker-5"} {
 		worker, err := wm.AddHandler(name, internal.QuickHandler(name))
-		s.Require().NoError(err)
+		require.NoError(t, err)
 		workers = append(workers, worker)
 		wm.Start(name)
 	}
@@ -37,63 +31,79 @@ func (s *WorkerManagerTestSuite) TestStopAll_ShouldWaitAllWorkersToStop() {
 
 	// Assert
 	for _, worker := range workers {
-		s.Equal(workermanager.StatusStopped, worker.Status())
+		require.Equal(t, workermanager.StatusStopped, worker.Status())
 	}
 }
 
-func (s *WorkerManagerTestSuite) TestWorkerManager_WhenStop_ShouldAwaitWorkerStop() {
+func TestStop_WhenWorkerRunning_ShouldAwaitWorkerStop(t *testing.T) {
+	t.Parallel()
+
 	// Arrange
 	wm := workermanager.NewWorkerManager(context.Background())
 	worker, err := wm.AddHandler("worker-1", internal.QuickHandler("worker-1"))
-	s.Require().NoError(err)
+	require.NoError(t, err)
 	wm.Start("worker-1")
 	time.Sleep(20 * time.Millisecond)
 
 	// Act
 	stopChan, err := wm.Stop("worker-1")
-	s.Require().NoError(err)
+	require.NoError(t, err)
 	<-stopChan
 
 	// Assert
-	s.Equal(workermanager.StatusStopped, worker.Status())
+	require.Equal(t, workermanager.StatusStopped, worker.Status())
 }
 
-func (s *WorkerManagerTestSuite) TestAddHandler_WhenDuplicateName_ReturnsError() {
+func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
 	// Arrange
 	wm := workermanager.NewWorkerManager(context.Background())
 
 	// Act
 	_, err := wm.AddHandler("a", internal.QuickHandler("a"))
-	s.Require().NoError(err)
+	require.NoError(t, err)
 	_, err = wm.AddHandler("a", internal.QuickHandler("a"))
-	s.Require().Error(err)
+	require.Error(t, err)
 
 	// Assert
-	s.Contains(err.Error(), "already exists")
+	require.Contains(t, err.Error(), "already exists")
 }
 
-func (s *WorkerManagerTestSuite) TestStart_WhenWorkerNotFound_ReturnsError() {
+func TestStart_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
 	// Arrange
 	wm := workermanager.NewWorkerManager(context.Background())
 
 	// Act
 	err := wm.Start("missing")
-	s.Require().Error(err)
+	require.Error(t, err)
 
 	// Assert
-	s.Contains(err.Error(), "not found")
+	require.Contains(t, err.Error(), "not found")
 }
 
-func (s *WorkerManagerTestSuite) TestStartAll_StartsAllWorkers() {
+func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
 	wm := workermanager.NewWorkerManager(context.Background())
 	_, _ = wm.AddHandler("w1", internal.QuickHandler("w1"))
 	_, _ = wm.AddHandler("w2", internal.QuickHandler("w2"))
-	s.Require().NoError(wm.StartAll())
+
+	// Act
+	require.NoError(t, wm.StartAll())
 	time.Sleep(20 * time.Millisecond)
 	<-wm.StopAll()
+
+	// Assert
+	// (implicit: StopAll completes without hanging)
 }
 
-func (s *WorkerManagerTestSuite) TestStop_WhenWorkerNotFound_ReturnsError() {
+func TestStop_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
 	// Arrange
 	wm := workermanager.NewWorkerManager(context.Background())
 
@@ -101,90 +111,145 @@ func (s *WorkerManagerTestSuite) TestStop_WhenWorkerNotFound_ReturnsError() {
 	ch, err := wm.Stop("missing")
 
 	// Assert
-	s.Require().Error(err)
-	s.Nil(ch)
-	s.Contains(err.Error(), "not found")
+	require.Error(t, err)
+	require.Nil(t, ch)
+	require.Contains(t, err.Error(), "not found")
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_Start_WhenAlreadyRunning_IsNoOp() {
+func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
 	ctx := context.Background()
 	worker := workermanager.NewWorker("w", internal.QuickHandler("w"))
-	s.Require().NoError(worker.Start(ctx))
-	s.Require().NoError(worker.Start(ctx)) // second call is no-op
+	require.NoError(t, worker.Start(ctx))
+
+	// Act
+	require.NoError(t, worker.Start(ctx)) // second call is no-op
 	<-worker.Stop(ctx)
-	s.Equal(workermanager.StatusStopped, worker.Status())
+
+	// Assert
+	require.Equal(t, workermanager.StatusStopped, worker.Status())
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_Stop_WhenNotStarted_ReturnsClosedChannelImmediately() {
+func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
 	worker := workermanager.NewWorker("w", internal.QuickHandler("w"))
+
+	// Act
 	ch := worker.Stop(context.Background())
-	s.NotNil(ch)
+
+	// Assert
+	require.NotNil(t, ch)
 	_, open := <-ch
-	s.False(open, "channel should be closed immediately when worker was never started")
+	require.False(t, open, "channel should be closed immediately when worker was never started")
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_NameAndStatus() {
+func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
 	worker := workermanager.NewWorker("my-name", internal.QuickHandler("x"))
-	s.Equal("my-name", worker.Name())
-	s.Equal(workermanager.StatusStopped, worker.Status())
+
+	// Act
+	name := worker.Name()
+	status := worker.Status()
+
+	// Assert
+	require.Equal(t, "my-name", name)
+	require.Equal(t, workermanager.StatusStopped, status)
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_WhenHandleReturnsNone_SleepsForIdleDuration() {
+func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
 	h := internal.IdleHandler("idle", 15*time.Millisecond)
 	worker := workermanager.NewWorker("idle", h)
 	ctx := context.Background()
-	s.Require().NoError(worker.Start(ctx))
+	require.NoError(t, worker.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
+
+	// Act
 	ch := worker.Stop(ctx)
 	<-ch
-	s.Equal(workermanager.StatusStopped, worker.Status())
+
+	// Assert
+	require.Equal(t, workermanager.StatusStopped, worker.Status())
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_WhenIdleSleep_StopCancelsContextAndExitsSelect() {
-	// Use long idle so worker is in time.After; Stop() cancels ctx so select gets <-ctx.Done()
+func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T) {
+	t.Parallel()
+
+	// Arrange (long idle so worker is in time.After; Stop() cancels ctx so select gets <-ctx.Done())
 	h := internal.IdleHandler("idle", 5*time.Second)
 	worker := workermanager.NewWorker("idle", h)
 	ctx := context.Background()
-	s.Require().NoError(worker.Start(ctx))
+	require.NoError(t, worker.Start(ctx))
 	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle sleep
+
+	// Act
 	ch := worker.Stop(ctx)
 	<-ch
-	s.Equal(workermanager.StatusStopped, worker.Status())
+
+	// Assert
+	require.Equal(t, workermanager.StatusStopped, worker.Status())
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_WhenHandleReturnsNoneWithZeroDuration_DoesNotSleep() {
-	// Covers handle() path where Status is None but IdleDuration is 0 (no select).
+func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.T) {
+	t.Parallel()
+
+	// Arrange (covers handle() path where Status is None but IdleDuration is 0, no select)
 	h := internal.NoneZeroHandler("idle")
 	worker := workermanager.NewWorker("idle", h)
 	ctx := context.Background()
-	s.Require().NoError(worker.Start(ctx))
+	require.NoError(t, worker.Start(ctx))
 	time.Sleep(30 * time.Millisecond)
+
+	// Act
 	ch := worker.Stop(ctx)
 	<-ch
-	s.Equal(workermanager.StatusStopped, worker.Status())
+
+	// Assert
+	require.Equal(t, workermanager.StatusStopped, worker.Status())
 }
 
-func (s *WorkerManagerTestSuite) TestWorker_WhenHandleReturnsFail_LogsErrorAndCanSleep() {
+func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
 	err := fmt.Errorf("handler failed")
 	h := internal.FailHandler("fail", err, 15*time.Millisecond)
 	worker := workermanager.NewWorker("fail", h)
 	ctx := context.Background()
-	s.Require().NoError(worker.Start(ctx))
+	require.NoError(t, worker.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
+
+	// Act
 	ch := worker.Stop(ctx)
 	<-ch
-	s.Equal(workermanager.StatusStopped, worker.Status())
+
+	// Assert
+	require.Equal(t, workermanager.StatusStopped, worker.Status())
 }
 
-func (s *WorkerManagerTestSuite) TestHandleResult_NoneDoneFail() {
-	s.Equal(workermanager.HandleStatusNone, workermanager.None(time.Second).Status)
-	s.Equal(time.Second, workermanager.None(time.Second).IdleDuration)
-
-	s.Equal(workermanager.HandleStatusDone, workermanager.Done().Status)
-
+func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {
+	t.Parallel()
+	// Arrange
 	e := fmt.Errorf("fail")
-	r := workermanager.Fail(e, 2*time.Second)
-	s.Equal(workermanager.HandleStatusFail, r.Status)
-	s.Equal(e, r.Err)
-	s.Equal(2*time.Second, r.IdleDuration)
+
+	// Act
+	noneResult := workermanager.None(time.Second)
+	doneResult := workermanager.Done()
+	failResult := workermanager.Fail(e, 2*time.Second)
+
+	// Assert
+	require.Equal(t, workermanager.HandleStatusNone, noneResult.Status)
+	require.Equal(t, time.Second, noneResult.IdleDuration)
+	require.Equal(t, workermanager.HandleStatusDone, doneResult.Status)
+	require.Equal(t, workermanager.HandleStatusFail, failResult.Status)
+	require.Equal(t, e, failResult.Err)
+	require.Equal(t, 2*time.Second, failResult.IdleDuration)
 }
