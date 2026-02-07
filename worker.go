@@ -33,27 +33,25 @@ type Worker struct {
 	cancel           context.CancelFunc
 	done             chan struct{}
 	panicCount       int
-	maxPanicAttempts int // 0 means no limit
+	maxPanicAttempts int           // 0 means no limit
+	panicBackoff     time.Duration // 0 means use defaultPanicBackoff
 }
 
-// NewWorker creates a Worker that runs the given handler under the given name.
-// The worker starts in StatusStopped; call Start to run it.
-func NewWorker(name string, handler Handler) *Worker {
-	return &Worker{
-		name:    name,
-		handler: handler,
-		status:  StatusStopped,
-		done:    make(chan struct{}),
+// NewWorker creates a Worker that runs the given handler under the given name
+// with the given config. The worker starts in StatusStopped; call Start to run it.
+func NewWorker(name string, handler Handler, config Config) *Worker {
+	backoff := config.PanicBackoff
+	if backoff <= 0 {
+		backoff = defaultPanicBackoff
 	}
-}
-
-// SetMaxPanicAttempts sets the maximum number of panic recoveries before the
-// worker stops itself. After this many panics, the worker cancels its context
-// and exits. Use 0 for no limit (default). Must be set before or after Start.
-func (w *Worker) SetMaxPanicAttempts(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.maxPanicAttempts = n
+	return &Worker{
+		name:             name,
+		handler:          handler,
+		status:           StatusStopped,
+		done:             make(chan struct{}),
+		maxPanicAttempts: config.MaxPanicAttempts,
+		panicBackoff:     backoff,
+	}
 }
 
 // Name returns the name assigned to this worker when it was created.
@@ -166,7 +164,7 @@ func (w *Worker) onPanicRecovered(ctx context.Context, v interface{}) {
 	w.mu.Unlock()
 	select {
 	case <-ctx.Done():
-	case <-time.After(defaultPanicBackoff):
+	case <-time.After(w.panicBackoff):
 	}
 	w.mu.Lock()
 }

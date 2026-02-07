@@ -4,15 +4,26 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
+
+// Config holds optional settings for a worker registered with AddHandler.
+type Config struct {
+	// MaxPanicAttempts is the maximum number of panic recoveries before the worker
+	// stops itself. Use 0 for no limit (default).
+	MaxPanicAttempts int
+	// PanicBackoff is the duration the worker sleeps after recovering a panic
+	// before calling Handle again. Use 0 for the default (1 second).
+	PanicBackoff time.Duration
+}
 
 // Operator manages a set of named workers. Register handlers with AddHandler,
 // then start/stop workers by name or all at once. All methods are safe for
 // concurrent use.
 type Operator interface {
-	// AddHandler registers a handler under the given name and returns the Worker.
-	// Returns an error if name is already registered.
-	AddHandler(name string, handler Handler) (*Worker, error)
+	// AddHandler registers a handler under the given name with the given config
+	// and returns the Worker. Returns an error if name is already registered.
+	AddHandler(name string, handler Handler, config Config) (*Worker, error)
 	// Start starts the worker with the given name. Returns error if name not found.
 	Start(name string) error
 	// StartAll starts every registered worker. Returns on first error if any.
@@ -40,7 +51,7 @@ func NewOperator(ctx context.Context) Operator {
 	}
 }
 
-func (op *operator) AddHandler(name string, handler Handler) (*Worker, error) {
+func (op *operator) AddHandler(name string, handler Handler, config Config) (*Worker, error) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
 
@@ -48,7 +59,7 @@ func (op *operator) AddHandler(name string, handler Handler) (*Worker, error) {
 		return nil, fmt.Errorf("worker %s already exists", name)
 	}
 
-	worker := NewWorker(name, handler)
+	worker := NewWorker(name, handler, config)
 	op.workers[name] = worker
 
 	return worker, nil

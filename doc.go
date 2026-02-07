@@ -15,7 +15,7 @@
 //
 //	ctx := context.Background()
 //	op := smoothoperator.NewOperator(ctx)
-//	worker, err := op.AddHandler("my-worker", myHandler)
+//	worker, err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{})
 //	if err != nil { ... }
 //	op.Start("my-worker")
 //	// ... later ...

@@ -13,7 +13,7 @@ func (noopHandler) Handle(context.Context) HandleResult { return Done() }
 func TestStartAll_WhenStartReturnsError_PropagatesError(t *testing.T) {
 	ctx := context.Background()
 	op := NewOperator(ctx).(*operator)
-	worker := NewWorker("actual-name", noopHandler{})
+	worker := NewWorker("actual-name", noopHandler{}, Config{})
 	op.workers["key-mismatch"] = worker
 	err := op.StartAll()
 	if err == nil {

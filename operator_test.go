@@ -19,7 +19,7 @@ func TestStopAll_WhenMultipleWorkersRunning_ShouldWaitAllWorkersToStop(t *testin
 	op := smoothoperator.NewOperator(context.Background())
 	var workers []*smoothoperator.Worker
 	for _, name := range []string{"worker-1", "worker-2", "worker-3", "worker-4", "worker-5"} {
-		worker, err := op.AddHandler(name, internal.QuickHandler(name))
+		worker, err := op.AddHandler(name, internal.QuickHandler(name), smoothoperator.Config{})
 		require.NoError(t, err)
 		workers = append(workers, worker)
 		op.Start(name)
@@ -40,7 +40,7 @@ func TestStop_WhenWorkerRunning_ShouldAwaitWorkerStop(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	worker, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
+	worker, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
 	require.NoError(t, err)
 	op.Start("worker-1")
 	time.Sleep(20 * time.Millisecond)
@@ -61,9 +61,9 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 	op := smoothoperator.NewOperator(context.Background())
 
 	// Act
-	_, err := op.AddHandler("a", internal.QuickHandler("a"))
+	_, err := op.AddHandler("a", internal.QuickHandler("a"), smoothoperator.Config{})
 	require.NoError(t, err)
-	_, err = op.AddHandler("a", internal.QuickHandler("a"))
+	_, err = op.AddHandler("a", internal.QuickHandler("a"), smoothoperator.Config{})
 	require.Error(t, err)
 
 	// Assert
@@ -89,8 +89,8 @@ func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, _ = op.AddHandler("w1", internal.QuickHandler("w1"))
-	_, _ = op.AddHandler("w2", internal.QuickHandler("w2"))
+	_, _ = op.AddHandler("w1", internal.QuickHandler("w1"), smoothoperator.Config{})
+	_, _ = op.AddHandler("w2", internal.QuickHandler("w2"), smoothoperator.Config{})
 
 	// Act
 	require.NoError(t, op.StartAll())
@@ -121,7 +121,7 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 
 	// Arrange
 	ctx := context.Background()
-	worker := smoothoperator.NewWorker("w", internal.QuickHandler("w"))
+	worker := smoothoperator.NewWorker("w", internal.QuickHandler("w"), smoothoperator.Config{})
 	require.NoError(t, worker.Start(ctx))
 
 	// Act
@@ -136,7 +136,7 @@ func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testi
 	t.Parallel()
 
 	// Arrange
-	worker := smoothoperator.NewWorker("w", internal.QuickHandler("w"))
+	worker := smoothoperator.NewWorker("w", internal.QuickHandler("w"), smoothoperator.Config{})
 
 	// Act
 	ch := worker.Stop(context.Background())
@@ -151,7 +151,7 @@ func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	worker := smoothoperator.NewWorker("my-name", internal.QuickHandler("x"))
+	worker := smoothoperator.NewWorker("my-name", internal.QuickHandler("x"), smoothoperator.Config{})
 
 	// Act
 	name := worker.Name()
@@ -167,7 +167,7 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 
 	// Arrange
 	h := internal.IdleHandler("idle", 15*time.Millisecond)
-	worker := smoothoperator.NewWorker("idle", h)
+	worker := smoothoperator.NewWorker("idle", h, smoothoperator.Config{})
 	ctx := context.Background()
 	require.NoError(t, worker.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -185,7 +185,7 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 
 	// Arrange (long idle so worker is in time.After; Stop() cancels ctx so select gets <-ctx.Done())
 	h := internal.IdleHandler("idle", 5*time.Second)
-	worker := smoothoperator.NewWorker("idle", h)
+	worker := smoothoperator.NewWorker("idle", h, smoothoperator.Config{})
 	ctx := context.Background()
 	require.NoError(t, worker.Start(ctx))
 	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle sleep
@@ -203,7 +203,7 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 
 	// Arrange (covers handle() path where Status is None but IdleDuration is 0, no select)
 	h := internal.NoneZeroHandler("idle")
-	worker := smoothoperator.NewWorker("idle", h)
+	worker := smoothoperator.NewWorker("idle", h, smoothoperator.Config{})
 	ctx := context.Background()
 	require.NoError(t, worker.Start(ctx))
 	time.Sleep(30 * time.Millisecond)
@@ -222,7 +222,7 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	// Arrange
 	err := fmt.Errorf("handler failed")
 	h := internal.FailHandler("fail", err, 15*time.Millisecond)
-	worker := smoothoperator.NewWorker("fail", h)
+	worker := smoothoperator.NewWorker("fail", h, smoothoperator.Config{})
 	ctx := context.Background()
 	require.NoError(t, worker.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -239,7 +239,7 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 	t.Parallel()
 
 	// Arrange: handler that panics every time; no max attempts so worker keeps running
-	worker := smoothoperator.NewWorker("panic-worker", internal.PanicHandler("panic-worker"))
+	worker := smoothoperator.NewWorker("panic-worker", internal.PanicHandler("panic-worker"), smoothoperator.Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	require.NoError(t, worker.Start(ctx))
@@ -263,8 +263,7 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	t.Parallel()
 
-	worker := smoothoperator.NewWorker("panic-worker", internal.PanicHandler("panic-worker"))
-	worker.SetMaxPanicAttempts(3)
+	worker := smoothoperator.NewWorker("panic-worker", internal.PanicHandler("panic-worker"), smoothoperator.Config{MaxPanicAttempts: 3})
 	ctx := context.Background()
 	require.NoError(t, worker.Start(ctx))
 
