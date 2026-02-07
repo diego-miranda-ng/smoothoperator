@@ -15,7 +15,7 @@ const (
 )
 
 // Worker wraps a Handler and manages its state, status, and lifecycle.
-// The manager adds handlers and receives Workers; Worker exposes Start/Stop.
+// The operator adds handlers and receives Workers; Worker exposes Start/Stop.
 // Optionally set ErrorLogger so Fail results from Handle are logged.
 type Worker struct {
 	name    string

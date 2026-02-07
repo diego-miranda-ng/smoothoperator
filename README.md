@@ -1,4 +1,4 @@
-# workermanager
+# smoothoperator
 
 A small Go library to run multiple named workers (goroutines) with a shared context. Each worker runs a `Handler` in a loop until the context is cancelled; handlers can report "no work" and sleep for a configurable duration to avoid busy-looping.
 
@@ -24,14 +24,14 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    wm := workermanager.NewWorkerManager(ctx)
+    op := workermanager.NewOperator(ctx)
 
-    wm.AddHandler("my-worker", myHandler{})
-    wm.StartAll()
+    op.AddHandler("my-worker", myHandler{})
+    op.StartAll()
 
     // ... run until shutdown ...
     cancel()
-    <-wm.StopAll()
+    <-op.StopAll()
 }
 
 type myHandler struct{}
@@ -43,11 +43,11 @@ func (myHandler) Handle(ctx context.Context) workermanager.HandleResult {
 ```
 
 - **`Handler`** implements `Handle(ctx) HandleResult`. Return `Done()`, `None(idleDuration)`, or `Fail(err, idleDuration)`.
-- **`NewWorkerManager(ctx)`** creates a manager. Use `AddHandler(name, handler)`, then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown.
+- **`NewOperator(ctx)`** creates an operator. Use `AddHandler(name, handler)`, then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown.
 
 ## Project structure
 
-- **Root package** – public API: `WorkManager`, `Worker`, `Handler`, `HandleResult`, `NewWorkerManager`, etc.
+- **Root package** – public API: `Operator`, `Worker`, `Handler`, `HandleResult`, `NewOperator`, etc.
 - **internal** – test helpers and mocks (not part of the public API).
 
 ## Development

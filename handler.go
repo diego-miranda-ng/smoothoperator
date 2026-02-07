@@ -39,7 +39,7 @@ func Fail(err error, idle time.Duration) HandleResult {
 }
 
 // Handler is the minimal interface for business logic. Handlers are added to
-// the work manager and wrapped by a Worker which manages state and lifecycle.
+// the operator and wrapped by a Worker which manages state and lifecycle.
 // Handle returns a status: None (sleep IdleDuration), Done (continue), or Fail (log Err, optional sleep).
 type Handler interface {
 	Handle(ctx context.Context) HandleResult

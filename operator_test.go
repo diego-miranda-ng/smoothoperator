@@ -16,18 +16,18 @@ func TestStopAll_WhenMultipleWorkersRunning_ShouldWaitAllWorkersToStop(t *testin
 	t.Parallel()
 
 	// Arrange
-	wm := workermanager.NewWorkerManager(context.Background())
+	op := workermanager.NewOperator(context.Background())
 	var workers []*workermanager.Worker
 	for _, name := range []string{"worker-1", "worker-2", "worker-3", "worker-4", "worker-5"} {
-		worker, err := wm.AddHandler(name, internal.QuickHandler(name))
+		worker, err := op.AddHandler(name, internal.QuickHandler(name))
 		require.NoError(t, err)
 		workers = append(workers, worker)
-		wm.Start(name)
+		op.Start(name)
 	}
 	time.Sleep(20 * time.Millisecond)
 
 	// Act
-	<-wm.StopAll()
+	<-op.StopAll()
 
 	// Assert
 	for _, worker := range workers {
@@ -39,14 +39,14 @@ func TestStop_WhenWorkerRunning_ShouldAwaitWorkerStop(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	wm := workermanager.NewWorkerManager(context.Background())
-	worker, err := wm.AddHandler("worker-1", internal.QuickHandler("worker-1"))
+	op := workermanager.NewOperator(context.Background())
+	worker, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
 	require.NoError(t, err)
-	wm.Start("worker-1")
+	op.Start("worker-1")
 	time.Sleep(20 * time.Millisecond)
 
 	// Act
-	stopChan, err := wm.Stop("worker-1")
+	stopChan, err := op.Stop("worker-1")
 	require.NoError(t, err)
 	<-stopChan
 
@@ -58,12 +58,12 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	wm := workermanager.NewWorkerManager(context.Background())
+	op := workermanager.NewOperator(context.Background())
 
 	// Act
-	_, err := wm.AddHandler("a", internal.QuickHandler("a"))
+	_, err := op.AddHandler("a", internal.QuickHandler("a"))
 	require.NoError(t, err)
-	_, err = wm.AddHandler("a", internal.QuickHandler("a"))
+	_, err = op.AddHandler("a", internal.QuickHandler("a"))
 	require.Error(t, err)
 
 	// Assert
@@ -74,10 +74,10 @@ func TestStart_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	wm := workermanager.NewWorkerManager(context.Background())
+	op := workermanager.NewOperator(context.Background())
 
 	// Act
-	err := wm.Start("missing")
+	err := op.Start("missing")
 	require.Error(t, err)
 
 	// Assert
@@ -88,14 +88,14 @@ func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	wm := workermanager.NewWorkerManager(context.Background())
-	_, _ = wm.AddHandler("w1", internal.QuickHandler("w1"))
-	_, _ = wm.AddHandler("w2", internal.QuickHandler("w2"))
+	op := workermanager.NewOperator(context.Background())
+	_, _ = op.AddHandler("w1", internal.QuickHandler("w1"))
+	_, _ = op.AddHandler("w2", internal.QuickHandler("w2"))
 
 	// Act
-	require.NoError(t, wm.StartAll())
+	require.NoError(t, op.StartAll())
 	time.Sleep(20 * time.Millisecond)
-	<-wm.StopAll()
+	<-op.StopAll()
 
 	// Assert
 	// (implicit: StopAll completes without hanging)
@@ -105,10 +105,10 @@ func TestStop_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	wm := workermanager.NewWorkerManager(context.Background())
+	op := workermanager.NewOperator(context.Background())
 
 	// Act
-	ch, err := wm.Stop("missing")
+	ch, err := op.Stop("missing")
 
 	// Assert
 	require.Error(t, err)

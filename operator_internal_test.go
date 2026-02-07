@@ -12,10 +12,10 @@ func (noopHandler) Handle(context.Context) HandleResult { return Done() }
 // TestStartAll_WhenStartReturnsError_PropagatesError covers the error-return path in StartAll.
 func TestStartAll_WhenStartReturnsError_PropagatesError(t *testing.T) {
 	ctx := context.Background()
-	wm := NewWorkerManager(ctx).(*workerManager)
+	op := NewOperator(ctx).(*operator)
 	worker := NewWorker("actual-name", noopHandler{})
-	wm.workers["key-mismatch"] = worker
-	err := wm.StartAll()
+	op.workers["key-mismatch"] = worker
+	err := op.StartAll()
 	if err == nil {
 		t.Fatal("expected error from StartAll")
 	}
