@@ -1,9 +1,9 @@
 # smoothoperator – Package Documentation
 
 **Module:** `github.com/diego-miranda-ng/smoothoperator`  
-**Package:** `workermanager`
+**Package:** `smoothoperator`
 
-This document describes all exported types and methods of the `workermanager` package.
+This document describes all exported types and methods of the `smoothoperator` package.
 
 ---
 
@@ -277,7 +277,7 @@ const (
 
 ```go
 ctx := context.Background()
-op := workermanager.NewOperator(ctx)
+op := smoothoperator.NewOperator(ctx)
 
 worker, err := op.AddHandler("my-worker", myHandler)
 if err != nil {
@@ -298,7 +298,7 @@ if err != nil {
 ### Start all, stop all
 
 ```go
-op := workermanager.NewOperator(ctx)
+op := smoothoperator.NewOperator(ctx)
 op.AddHandler("a", handlerA)
 op.AddHandler("b", handlerB)
 op.StartAll()
@@ -309,23 +309,23 @@ op.StartAll()
 ### Handler returning None / Done / Fail
 
 ```go
-func (h *MyHandler) Handle(ctx context.Context) workermanager.HandleResult {
+func (h *MyHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
     job, err := h.queue.Poll(ctx)
     if err != nil {
-        return workermanager.Fail(err, 5*time.Second)
+        return smoothoperator.Fail(err, 5*time.Second)
     }
     if job == nil {
-        return workermanager.None(1*time.Second)
+        return smoothoperator.None(1*time.Second)
     }
     h.process(job)
-    return workermanager.Done()
+    return smoothoperator.Done()
 }
 ```
 
 ### Direct Worker use (without Operator)
 
 ```go
-worker := workermanager.NewWorker("standalone", myHandler)
+worker := smoothoperator.NewWorker("standalone", myHandler)
 worker.Start(ctx)
 // ...
 <-worker.Stop(context.Background())
@@ -333,4 +333,4 @@ worker.Start(ctx)
 
 ---
 
-*Generated for package `github.com/diego-miranda-ng/smoothoperator`.*
+*Generated for package `smoothoperator` (module `github.com/diego-miranda-ng/smoothoperator`).*

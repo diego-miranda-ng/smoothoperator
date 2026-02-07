@@ -1,4 +1,4 @@
-package workermanager
+package smoothoperator
 
 import (
 	"context"

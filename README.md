@@ -24,7 +24,7 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    op := workermanager.NewOperator(ctx)
+    op := smoothoperator.NewOperator(ctx)
 
     op.AddHandler("my-worker", myHandler{})
     op.StartAll()
@@ -36,9 +36,9 @@ func main() {
 
 type myHandler struct{}
 
-func (myHandler) Handle(ctx context.Context) workermanager.HandleResult {
-    // Do work; return workermanager.Done(), workermanager.None(idle), or workermanager.Fail(err, idle).
-    return workermanager.Done()
+func (myHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+    // Do work; return smoothoperator.Done(), smoothoperator.None(idle), or smoothoperator.Fail(err, idle).
+    return smoothoperator.Done()
 }
 ```
 

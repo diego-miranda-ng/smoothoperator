@@ -1,4 +1,4 @@
-// Package workermanager provides a worker pool abstraction for running named
+// Package smoothoperator provides a worker pool abstraction for running named
 // handlers in goroutines with coordinated start/stop and configurable idle behavior.
 //
 // # Overview
@@ -14,7 +14,7 @@
 // Create an operator with a context (used for all workers), add handlers, then start/stop:
 //
 //	ctx := context.Background()
-//	op := workermanager.NewOperator(ctx)
+//	op := smoothoperator.NewOperator(ctx)
 //	worker, err := op.AddHandler("my-worker", myHandler)
 //	if err != nil { ... }
 //	op.Start("my-worker")
@@ -25,4 +25,4 @@
 // Workers run in a loop: Handle is called; if the result is None or Fail with IdleDuration,
 // the worker sleeps for that duration before the next Handle call. Stop cancels the context
 // and returns a channel that closes when the worker has fully stopped.
-package workermanager
+package smoothoperator
