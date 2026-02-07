@@ -115,7 +115,7 @@ Typical usage: `<-op.StopAll()` to block until every worker has stopped.
 
 ## Worker
 
-A **Worker** wraps a `Handler` and runs it in a loop in a single goroutine until stopped. It exposes name, status, and lifecycle methods.
+A **Worker** wraps a `Handler` and runs it in a loop in a single goroutine until stopped. It exposes name, status, and lifecycle methods. If `Handle` panics, the worker recovers, logs the panic, sleeps for a short backoff, then continues the loop so the goroutine does not exit and `Stop` can complete normally.
 
 ### Type
 
@@ -158,6 +158,14 @@ Returns the current worker status: `StatusRunning` or `StatusStopped`. Safe to c
 
 ---
 
+#### `SetMaxPanicAttempts(n int)`
+
+Sets the maximum number of panic recoveries before the worker stops itself. After this many panics, the worker logs that the limit was reached, cancels its context, and exits. Use `0` for no limit (default). Safe to call before or after `Start`.
+
+- **Parameters:** `n` – maximum panic count; `0` means unlimited.
+
+---
+
 #### `Start(ctx context.Context) error`
 
 Starts the worker loop in a new goroutine. The loop runs until `ctx` is cancelled (e.g. by calling `Stop`). Idempotent: if the worker is already running, `Start` returns `nil` without starting a second loop.
@@ -175,6 +183,16 @@ Cancels the worker’s context and returns a channel that closes when the worker
 - **Returns:** `chan struct{}` – closes when the worker has stopped; never nil.
 
 Typical usage: `<-worker.Stop(ctx)` to block until the worker has stopped.
+
+---
+
+### Panic recovery and max attempts
+
+If a handler’s `Handle` method panics, the worker recovers inside the loop. The panic value is converted to an error and logged (via the standard `log` package), the panic count is incremented, then the worker sleeps for a fixed backoff (one second) before calling `Handle` again. Context cancellation is respected during this sleep, so `Stop` still causes the worker to exit promptly.
+
+You can set a maximum number of panic recoveries with **SetMaxPanicAttempts**. When the count reaches that limit, the worker logs that the limit was reached, cancels its own context, and exits. Use `0` (the default) for no limit.
+
+Handle errors (when the handler returns `Fail` with a non-nil `Err`) are also logged with the standard `log` package.
 
 ---
 

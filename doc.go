@@ -23,6 +23,7 @@
 //	// or stop all: <-op.StopAll()
 //
 // Workers run in a loop: Handle is called; if the result is None or Fail with IdleDuration,
-// the worker sleeps for that duration before the next Handle call. Stop cancels the context
+// the worker sleeps for that duration before the next Handle call. If Handle panics, the
+// worker recovers, logs the panic, sleeps briefly, and continues. Stop cancels the context
 // and returns a channel that closes when the worker has fully stopped.
 package smoothoperator

@@ -235,6 +235,50 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	require.Equal(t, smoothoperator.StatusStopped, worker.Status())
 }
 
+func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: handler that panics every time; no max attempts so worker keeps running
+	worker := smoothoperator.NewWorker("panic-worker", internal.PanicHandler("panic-worker"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, worker.Start(ctx))
+
+	// Give the worker time to hit the panic and recover at least once
+	time.Sleep(100 * time.Millisecond)
+
+	// Act: stop the worker; without panic recovery the goroutine would have died and done might never close
+	stopChan := worker.Stop(context.Background())
+
+	// Assert: stop channel closes (worker goroutine exited cleanly)
+	select {
+	case <-stopChan:
+		// expected: recovery kept the goroutine alive so it could exit on cancel
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not stop within timeout; panic recovery may not be working")
+	}
+	require.Equal(t, smoothoperator.StatusStopped, worker.Status())
+}
+
+func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
+	t.Parallel()
+
+	worker := smoothoperator.NewWorker("panic-worker", internal.PanicHandler("panic-worker"))
+	worker.SetMaxPanicAttempts(3)
+	ctx := context.Background()
+	require.NoError(t, worker.Start(ctx))
+
+	// Wait for worker to stop itself after 3 panics (each panic does 1s backoff; 3 panics ~ 3s+)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if worker.Status() == smoothoperator.StatusStopped {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.Equal(t, smoothoperator.StatusStopped, worker.Status(), "worker should stop itself after max panic attempts")
+}
+
 func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {
 	t.Parallel()
 	// Arrange

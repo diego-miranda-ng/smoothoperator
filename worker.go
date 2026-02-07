@@ -3,9 +3,14 @@ package smoothoperator
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
+
+// defaultPanicBackoff is the duration the worker sleeps after recovering a panic
+// before calling Handle again.
+const defaultPanicBackoff = time.Second
 
 // Status represents the current lifecycle state of a Worker.
 type Status string
@@ -21,12 +26,14 @@ const (
 // the handler in a loop in a goroutine until stopped. The Operator registers
 // handlers and returns Workers; call Start/Stop on the worker or via the Operator.
 type Worker struct {
-	name    string
-	handler Handler
-	status  Status
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	done    chan struct{}
+	name             string
+	handler          Handler
+	status           Status
+	mu               sync.Mutex
+	cancel           context.CancelFunc
+	done             chan struct{}
+	panicCount       int
+	maxPanicAttempts int // 0 means no limit
 }
 
 // NewWorker creates a Worker that runs the given handler under the given name.
@@ -38,6 +45,15 @@ func NewWorker(name string, handler Handler) *Worker {
 		status:  StatusStopped,
 		done:    make(chan struct{}),
 	}
+}
+
+// SetMaxPanicAttempts sets the maximum number of panic recoveries before the
+// worker stops itself. After this many panics, the worker cancels its context
+// and exits. Use 0 for no limit (default). Must be set before or after Start.
+func (w *Worker) SetMaxPanicAttempts(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.maxPanicAttempts = n
 }
 
 // Name returns the name assigned to this worker when it was created.
@@ -73,6 +89,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.cancel = cancel
 	w.done = make(chan struct{})
 	w.status = StatusRunning
+	w.panicCount = 0
 	w.mu.Unlock()
 
 	go func() {
@@ -113,9 +130,15 @@ func (w *Worker) handle(ctx context.Context) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	defer func() {
+		if v := recover(); v != nil {
+			w.onPanicRecovered(ctx, v)
+		}
+	}()
+
 	result := w.handler.Handle(ctx)
 	if result.Status == HandleStatusFail && result.Err != nil {
-		fmt.Println("error: ", result.Err)
+		log.Printf("worker %s: handle error: %v", w.name, result.Err)
 	}
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
@@ -125,4 +148,33 @@ func (w *Worker) handle(ctx context.Context) {
 		case <-time.After(result.IdleDuration):
 		}
 	}
+}
+
+// onPanicRecovered is run from a defer in handle() after recovering a panic.
+// Caller holds w.mu. It logs, increments count, stops if max reached, and does backoff (releasing lock during sleep).
+func (w *Worker) onPanicRecovered(ctx context.Context, v interface{}) {
+	err := panicToError(v)
+	w.panicCount++
+	log.Printf("worker %s: panic recovered (attempt %d): %v", w.name, w.panicCount, err)
+
+	if w.maxPanicAttempts > 0 && w.panicCount >= w.maxPanicAttempts {
+		log.Printf("worker %s: max panic attempts (%d) reached, stopping", w.name, w.maxPanicAttempts)
+		w.cancel()
+		return
+	}
+
+	w.mu.Unlock()
+	select {
+	case <-ctx.Done():
+	case <-time.After(defaultPanicBackoff):
+	}
+	w.mu.Lock()
+}
+
+// panicToError converts a recovered panic value to an error for logging.
+func panicToError(v interface{}) error {
+	if err, ok := v.(error); ok {
+		return err
+	}
+	return fmt.Errorf("panic: %v", v)
 }
