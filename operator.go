@@ -36,6 +36,12 @@ type Operator interface {
 	// RemoveHandler stops the worker with the given name (if running), waits for it
 	// to finish, and removes it from the operator. Returns error if name not found.
 	RemoveHandler(name string) error
+	// Send sends a message to the worker with the given name. If the worker is
+	// idle, it wakes up immediately. The message is passed to Handle via the msg
+	// parameter. Returns a channel that is closed once the handler has received
+	// the message, and an error if the worker is not found. Prefer the generic
+	// SendMessage function for type-safe sending.
+	Send(name string, msg any) (<-chan struct{}, error)
 	// Status returns the current status of the worker with the given name.
 	// Returns error if name not found.
 	Status(name string) (Status, error)
@@ -82,6 +88,23 @@ func (op *operator) RemoveHandler(name string) error {
 	// Stop the worker (if running) and wait for it to finish.
 	<-w.Stop(context.Background())
 	return nil
+}
+
+func (op *operator) Send(name string, msg any) (<-chan struct{}, error) {
+	op.mu.RLock()
+	w, ok := op.workers[name]
+	op.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("worker %s not found", name)
+	}
+
+	env := envelope{
+		msg:       msg,
+		delivered: make(chan struct{}),
+	}
+	w.msgCh <- env
+	return env.delivered, nil
 }
 
 func (op *operator) Status(name string) (Status, error) {

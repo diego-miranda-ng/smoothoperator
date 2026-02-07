@@ -17,7 +17,7 @@ func NewHandler(name string) smoothoperator.Handler {
 	return &handlerMock{name: name}
 }
 
-func (h *handlerMock) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *handlerMock) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	fmt.Println("worker", h.name, " is working")
 	select {
 	case <-ctx.Done():
@@ -37,7 +37,7 @@ type quickHandler struct {
 	name string
 }
 
-func (h *quickHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *quickHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.None(0)
@@ -57,7 +57,7 @@ type idleHandler struct {
 	idle time.Duration
 }
 
-func (h *idleHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *idleHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.None(0)
@@ -78,7 +78,7 @@ type failHandler struct {
 	idle time.Duration
 }
 
-func (h *failHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *failHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.Done()
@@ -96,7 +96,7 @@ type noneZeroHandler struct {
 	name string
 }
 
-func (h *noneZeroHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *noneZeroHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.Done()
@@ -114,6 +114,6 @@ type panicHandler struct {
 	name string
 }
 
-func (h *panicHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *panicHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	panic("panic from handler: " + h.name)
 }

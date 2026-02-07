@@ -35,6 +35,7 @@ type worker struct {
 	panicCount       int
 	maxPanicAttempts int           // 0 means no limit
 	panicBackoff     time.Duration // 0 means use defaultPanicBackoff
+	msgCh            chan envelope // buffered channel for incoming messages
 }
 
 // newWorker creates a worker that runs the given handler under the given name
@@ -51,6 +52,7 @@ func newWorker(name string, handler Handler, config Config) *worker {
 		done:             make(chan struct{}),
 		maxPanicAttempts: config.MaxPanicAttempts,
 		panicBackoff:     backoff,
+		msgCh:            make(chan envelope, 1),
 	}
 }
 
@@ -131,18 +133,44 @@ func (w *worker) handle(ctx context.Context) {
 		}
 	}()
 
-	result := w.handler.Handle(ctx)
-	if result.Status == HandleStatusFail && result.Err != nil {
-		log.Printf("worker %s: handle error: %v", w.name, result.Err)
+	// Non-blocking check for a pending message.
+	var raw envelope
+	select {
+	case raw = <-w.msgCh:
+	default:
 	}
+
+	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
 		select {
 		case <-ctx.Done():
 			return
+		case raw := <-w.msgCh:
+			// Woken up by an incoming message; execute the handler immediately.
+			w.executeHandler(ctx, w.unwrapEnvelope(raw))
 		case <-time.After(result.IdleDuration):
 		}
 	}
+}
+
+// unwrapEnvelope extracts the message from an envelope and signals delivery by
+// closing the delivered channel. Returns nil when env is a zero-value (no
+// message was received).
+func (w *worker) unwrapEnvelope(env envelope) any {
+	if env.delivered != nil {
+		close(env.delivered)
+	}
+	return env.msg
+}
+
+// executeHandler calls the handler's Handle method and logs any failure error.
+func (w *worker) executeHandler(ctx context.Context, msg any) HandleResult {
+	result := w.handler.Handle(ctx, msg)
+	if result.Status == HandleStatusFail && result.Err != nil {
+		log.Printf("worker %s: handle error: %v", w.name, result.Err)
+	}
+	return result
 }
 
 // onPanicRecovered is run from a defer in handle() after recovering a panic.

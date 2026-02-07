@@ -11,12 +11,12 @@ import (
 
 type noopHandler struct{}
 
-func (noopHandler) Handle(context.Context) HandleResult { return Done() }
+func (noopHandler) Handle(context.Context, any) HandleResult { return Done() }
 
 // quickHandler is a test handler that yields quickly (avoids importing internal and creating import cycle).
 type quickHandler struct{ name string }
 
-func (h quickHandler) Handle(ctx context.Context) HandleResult {
+func (h quickHandler) Handle(ctx context.Context, msg any) HandleResult {
 	select {
 	case <-ctx.Done():
 		return None(0)
@@ -27,7 +27,7 @@ func (h quickHandler) Handle(ctx context.Context) HandleResult {
 
 type idleHandler struct{ idle time.Duration }
 
-func (h idleHandler) Handle(ctx context.Context) HandleResult {
+func (h idleHandler) Handle(ctx context.Context, msg any) HandleResult {
 	select {
 	case <-ctx.Done():
 		return None(0)
@@ -38,14 +38,14 @@ func (h idleHandler) Handle(ctx context.Context) HandleResult {
 
 type noneZeroHandler struct{}
 
-func (noneZeroHandler) Handle(ctx context.Context) HandleResult { return None(0) }
+func (noneZeroHandler) Handle(ctx context.Context, msg any) HandleResult { return None(0) }
 
 type failHandler struct {
 	err  error
 	idle time.Duration
 }
 
-func (h failHandler) Handle(ctx context.Context) HandleResult {
+func (h failHandler) Handle(ctx context.Context, msg any) HandleResult {
 	select {
 	case <-ctx.Done():
 		return Done()
@@ -56,7 +56,7 @@ func (h failHandler) Handle(ctx context.Context) HandleResult {
 
 type panicHandler struct{ name string }
 
-func (panicHandler) Handle(context.Context) HandleResult { panic("test panic") }
+func (panicHandler) Handle(context.Context, any) HandleResult { panic("test panic") }
 
 func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 	t.Parallel()
