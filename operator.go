@@ -21,9 +21,9 @@ type Config struct {
 // then start/stop workers by name or all at once. All methods are safe for
 // concurrent use.
 type Operator interface {
-	// AddHandler registers a handler under the given name with the given config
-	// and returns the Worker. Returns an error if name is already registered.
-	AddHandler(name string, handler Handler, config Config) (*Worker, error)
+	// AddHandler registers a handler under the given name with the given config.
+	// Returns an error if name is already registered.
+	AddHandler(name string, handler Handler, config Config) error
 	// Start starts the worker with the given name. Returns error if name not found.
 	Start(name string) error
 	// StartAll starts every registered worker. Returns on first error if any.
@@ -33,11 +33,14 @@ type Operator interface {
 	Stop(name string) (chan struct{}, error)
 	// StopAll stops all workers and returns a channel that closes when all have stopped.
 	StopAll() chan struct{}
+	// Status returns the current status of the worker with the given name.
+	// Returns error if name not found.
+	Status(name string) (Status, error)
 }
 
 type operator struct {
 	ctx     context.Context
-	workers map[string]*Worker
+	workers map[string]*worker
 	mu      sync.RWMutex
 }
 
@@ -46,23 +49,32 @@ type operator struct {
 func NewOperator(ctx context.Context) Operator {
 	return &operator{
 		ctx:     ctx,
-		workers: make(map[string]*Worker),
+		workers: make(map[string]*worker),
 		mu:      sync.RWMutex{},
 	}
 }
 
-func (op *operator) AddHandler(name string, handler Handler, config Config) (*Worker, error) {
+func (op *operator) AddHandler(name string, handler Handler, config Config) error {
 	op.mu.Lock()
 	defer op.mu.Unlock()
 
 	if _, ok := op.workers[name]; ok {
-		return nil, fmt.Errorf("worker %s already exists", name)
+		return fmt.Errorf("worker %s already exists", name)
 	}
 
-	worker := NewWorker(name, handler, config)
-	op.workers[name] = worker
+	op.workers[name] = newWorker(name, handler, config)
+	return nil
+}
 
-	return worker, nil
+func (op *operator) Status(name string) (Status, error) {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
+
+	w, ok := op.workers[name]
+	if !ok {
+		return "", fmt.Errorf("worker %s not found", name)
+	}
+	return w.getStatus(), nil
 }
 
 func (op *operator) Start(name string) error {
@@ -79,10 +91,14 @@ func (op *operator) Start(name string) error {
 
 func (op *operator) StartAll() error {
 	op.mu.RLock()
-	defer op.mu.RUnlock()
+	names := make([]string, 0, len(op.workers))
+	for name := range op.workers {
+		names = append(names, name)
+	}
+	op.mu.RUnlock()
 
-	for _, worker := range op.workers {
-		if err := op.Start(worker.Name()); err != nil {
+	for _, name := range names {
+		if err := op.Start(name); err != nil {
 			return err
 		}
 	}
@@ -103,10 +119,14 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 
 func (op *operator) StopAll() chan struct{} {
 	op.mu.RLock()
-	defer op.mu.RUnlock()
+	names := make([]string, 0, len(op.workers))
+	for name := range op.workers {
+		names = append(names, name)
+	}
+	op.mu.RUnlock()
 
-	for _, worker := range op.workers {
-		if stopChan, _ := op.Stop(worker.Name()); stopChan != nil {
+	for _, name := range names {
+		if stopChan, _ := op.Stop(name); stopChan != nil {
 			<-stopChan
 		}
 	}

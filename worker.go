@@ -22,10 +22,10 @@ const (
 	StatusStopped Status = "stopped"
 )
 
-// Worker wraps a Handler and manages its state, status, and lifecycle. It runs
+// worker wraps a Handler and manages its state, status, and lifecycle. It runs
 // the handler in a loop in a goroutine until stopped. The Operator registers
-// handlers and returns Workers; call Start/Stop on the worker or via the Operator.
-type Worker struct {
+// handlers and starts/stops workers by name; the worker type is not exposed.
+type worker struct {
 	name             string
 	handler          Handler
 	status           Status
@@ -37,14 +37,14 @@ type Worker struct {
 	panicBackoff     time.Duration // 0 means use defaultPanicBackoff
 }
 
-// NewWorker creates a Worker that runs the given handler under the given name
+// newWorker creates a worker that runs the given handler under the given name
 // with the given config. The worker starts in StatusStopped; call Start to run it.
-func NewWorker(name string, handler Handler, config Config) *Worker {
+func newWorker(name string, handler Handler, config Config) *worker {
 	backoff := config.PanicBackoff
 	if backoff <= 0 {
 		backoff = defaultPanicBackoff
 	}
-	return &Worker{
+	return &worker{
 		name:             name,
 		handler:          handler,
 		status:           StatusStopped,
@@ -54,29 +54,27 @@ func NewWorker(name string, handler Handler, config Config) *Worker {
 	}
 }
 
-// Name returns the name assigned to this worker when it was created.
-func (w *Worker) Name() string {
+func (w *worker) getName() string {
 	return w.name
 }
 
-// Status returns the current worker status (StatusRunning or StatusStopped).
-// Safe to call from any goroutine.
-func (w *Worker) Status() Status {
+// getStatus returns the current worker status. Safe to call from any goroutine.
+func (w *worker) getStatus() Status {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.status
 }
 
-func (w *Worker) setStatus(status Status) {
+func (w *worker) setStatus(s Status) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.status = status
+	w.status = s
 }
 
 // Start starts the worker loop in a new goroutine. The loop runs until ctx is
 // cancelled (e.g. by calling Stop). Idempotent: if the worker is already
 // running, Start returns nil without starting a second loop.
-func (w *Worker) Start(ctx context.Context) error {
+func (w *worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.status == StatusRunning {
 		w.mu.Unlock()
@@ -108,9 +106,8 @@ func (w *Worker) Start(ctx context.Context) error {
 
 // Stop cancels the worker's context and returns a channel that closes when
 // the worker goroutine has fully exited. If the worker was never started,
-// returns an already-closed channel immediately. ctx is not used for cancellation
-// (the worker uses the context passed to Start) but is accepted for API consistency.
-func (w *Worker) Stop(ctx context.Context) chan struct{} {
+// returns an already-closed channel immediately.
+func (w *worker) Stop(ctx context.Context) chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -124,7 +121,7 @@ func (w *Worker) Stop(ctx context.Context) chan struct{} {
 	return w.done
 }
 
-func (w *Worker) handle(ctx context.Context) {
+func (w *worker) handle(ctx context.Context) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -150,7 +147,7 @@ func (w *Worker) handle(ctx context.Context) {
 
 // onPanicRecovered is run from a defer in handle() after recovering a panic.
 // Caller holds w.mu. It logs, increments count, stops if max reached, and does backoff (releasing lock during sleep).
-func (w *Worker) onPanicRecovered(ctx context.Context, v interface{}) {
+func (w *worker) onPanicRecovered(ctx context.Context, v interface{}) {
 	err := panicToError(v)
 	w.panicCount++
 	log.Printf("worker %s: panic recovered (attempt %d): %v", w.name, w.panicCount, err)
