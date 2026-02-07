@@ -7,16 +7,19 @@ import (
 	"time"
 )
 
+// Status represents the current lifecycle state of a Worker.
 type Status string
 
 const (
+	// StatusRunning means the worker goroutine is active and calling Handle.
 	StatusRunning Status = "running"
+	// StatusStopped means the worker is not running (either never started or stopped).
 	StatusStopped Status = "stopped"
 )
 
-// Worker wraps a Handler and manages its state, status, and lifecycle.
-// The operator adds handlers and receives Workers; Worker exposes Start/Stop.
-// Optionally set ErrorLogger so Fail results from Handle are logged.
+// Worker wraps a Handler and manages its state, status, and lifecycle. It runs
+// the handler in a loop in a goroutine until stopped. The Operator registers
+// handlers and returns Workers; call Start/Stop on the worker or via the Operator.
 type Worker struct {
 	name    string
 	handler Handler
@@ -26,7 +29,8 @@ type Worker struct {
 	done    chan struct{}
 }
 
-// NewWorker wraps a handler with the given name into a Worker.
+// NewWorker creates a Worker that runs the given handler under the given name.
+// The worker starts in StatusStopped; call Start to run it.
 func NewWorker(name string, handler Handler) *Worker {
 	return &Worker{
 		name:    name,
@@ -36,12 +40,13 @@ func NewWorker(name string, handler Handler) *Worker {
 	}
 }
 
-// Name returns the worker name.
+// Name returns the name assigned to this worker when it was created.
 func (w *Worker) Name() string {
 	return w.name
 }
 
-// Status returns the current worker status.
+// Status returns the current worker status (StatusRunning or StatusStopped).
+// Safe to call from any goroutine.
 func (w *Worker) Status() Status {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -54,8 +59,9 @@ func (w *Worker) setStatus(status Status) {
 	w.status = status
 }
 
-// Start starts the worker loop in a new goroutine. It runs until ctx is
-// cancelled. Idempotent if already running (no-op).
+// Start starts the worker loop in a new goroutine. The loop runs until ctx is
+// cancelled (e.g. by calling Stop). Idempotent: if the worker is already
+// running, Start returns nil without starting a second loop.
 func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.status == StatusRunning {
@@ -85,8 +91,10 @@ func (w *Worker) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop cancels the worker context and returns a channel that closes when
-// the worker has stopped.
+// Stop cancels the worker's context and returns a channel that closes when
+// the worker goroutine has fully exited. If the worker was never started,
+// returns an already-closed channel immediately. ctx is not used for cancellation
+// (the worker uses the context passed to Start) but is accepted for API consistency.
 func (w *Worker) Stop(ctx context.Context) chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()

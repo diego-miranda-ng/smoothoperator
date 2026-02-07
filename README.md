@@ -45,6 +45,15 @@ func (myHandler) Handle(ctx context.Context) workermanager.HandleResult {
 - **`Handler`** implements `Handle(ctx) HandleResult`. Return `Done()`, `None(idleDuration)`, or `Fail(err, idleDuration)`.
 - **`NewOperator(ctx)`** creates an operator. Use `AddHandler(name, handler)`, then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown.
 
+## Documentation
+
+For a full reference of all types and methods, see **[DOCUMENTATION.md](DOCUMENTATION.md)**. You can also use the standard godoc from the package directory:
+
+```bash
+go doc github.com/diego-miranda-ng/smoothoperator
+go doc github.com/diego-miranda-ng/smoothoperator.Operator
+```
+
 ## Project structure
 
 - **Root package** – public API: `Operator`, `Worker`, `Handler`, `HandleResult`, `NewOperator`, etc.

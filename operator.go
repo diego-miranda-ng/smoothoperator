@@ -6,11 +6,21 @@ import (
 	"sync"
 )
 
+// Operator manages a set of named workers. Register handlers with AddHandler,
+// then start/stop workers by name or all at once. All methods are safe for
+// concurrent use.
 type Operator interface {
+	// AddHandler registers a handler under the given name and returns the Worker.
+	// Returns an error if name is already registered.
 	AddHandler(name string, handler Handler) (*Worker, error)
+	// Start starts the worker with the given name. Returns error if name not found.
 	Start(name string) error
+	// StartAll starts every registered worker. Returns on first error if any.
 	StartAll() error
+	// Stop stops the worker with the given name and returns a channel that closes
+	// when the worker has stopped. Returns (nil, error) if name not found.
 	Stop(name string) (chan struct{}, error)
+	// StopAll stops all workers and returns a channel that closes when all have stopped.
 	StopAll() chan struct{}
 }
 
@@ -20,6 +30,8 @@ type operator struct {
 	mu      sync.RWMutex
 }
 
+// NewOperator creates an Operator that will use ctx for worker lifecycle. Workers
+// started via this operator run until ctx is cancelled or Stop/StopAll is called.
 func NewOperator(ctx context.Context) Operator {
 	return &operator{
 		ctx:     ctx,
