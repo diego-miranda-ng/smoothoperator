@@ -33,6 +33,9 @@ type Operator interface {
 	Stop(name string) (chan struct{}, error)
 	// StopAll stops all workers and returns a channel that closes when all have stopped.
 	StopAll() chan struct{}
+	// RemoveHandler stops the worker with the given name (if running), waits for it
+	// to finish, and removes it from the operator. Returns error if name not found.
+	RemoveHandler(name string) error
 	// Status returns the current status of the worker with the given name.
 	// Returns error if name not found.
 	Status(name string) (Status, error)
@@ -63,6 +66,21 @@ func (op *operator) AddHandler(name string, handler Handler, config Config) erro
 	}
 
 	op.workers[name] = newWorker(name, handler, config)
+	return nil
+}
+
+func (op *operator) RemoveHandler(name string) error {
+	op.mu.Lock()
+	w, ok := op.workers[name]
+	if !ok {
+		op.mu.Unlock()
+		return fmt.Errorf("worker %s not found", name)
+	}
+	delete(op.workers, name)
+	op.mu.Unlock()
+
+	// Stop the worker (if running) and wait for it to finish.
+	<-w.Stop(context.Background())
 	return nil
 }
 
