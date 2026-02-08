@@ -32,8 +32,8 @@ type HandleResult struct {
 	IdleDuration time.Duration
 	// Err is set when Status is Fail; it can be logged by the worker. Optional.
 	Err error
-	// Result is optional data returned to the caller of Send. When set, it is sent
-	// on the result channel returned by Send after the handler finishes execution.
+	// Result is optional data returned to the caller of Dispatch. When set, it is sent
+	// on the result channel returned by Dispatch after the handler finishes execution.
 	Result any
 }
 
@@ -51,8 +51,8 @@ func Done() HandleResult {
 }
 
 // DoneWithResult returns a HandleResult for when work was processed successfully
-// and the handler wants to return data to the caller of Send. The result is sent
-// on the result channel returned by Send after the handler finishes.
+// and the handler wants to return data to the caller of Dispatch. The result is sent
+// on the result channel returned by Dispatch after the handler finishes.
 func DoneWithResult(result any) HandleResult {
 	return HandleResult{Status: HandleStatusDone, Result: result}
 }

@@ -24,5 +24,5 @@ type envelope struct {
 // channel that receives the handler's Result (from HandleResult) when the handler
 // finishes, then closes; and an error if the worker is not found.
 func SendMessage[T any](op Operator, name string, data T) (<-chan struct{}, <-chan any, error) {
-	return op.Send(name, Message[T]{Data: data})
+	return op.Dispatch(name, Message[T]{Data: data})
 }
