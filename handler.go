@@ -64,13 +64,24 @@ func Fail(err error, idle time.Duration) HandleResult {
 	return HandleResult{Status: HandleStatusFail, IdleDuration: idle, Err: err}
 }
 
+// DispatcherAware is an optional interface. If a Handler implements it,
+// SetDispatcher is called once with the Operator's Dispatcher when the handler
+// is registered via AddHandler. The handler can store it and use it to send
+// messages to other workers. Handlers that do not need to dispatch need not
+// implement this interface.
+type DispatcherAware interface {
+	SetDispatcher(disp Dispatcher)
+}
+
 // Handler is the interface for business logic run by a Worker. Implement Handle
 // to perform one unit of work; return None (with optional idle), Done, or Fail.
 // Handlers are registered with an Operator via AddHandler and wrapped in a Worker.
+// To send messages to other workers, implement the optional DispatcherAware
+// interface; SetDispatcher will be called once at registration.
 type Handler interface {
 	// Handle performs one unit of work. It is called repeatedly by the worker until
 	// the worker is stopped. The msg parameter carries a message sent via SendMessage;
-	// it is nil when no message was sent. Return None/Done/Fail to control sleep and
-	// retry behavior.
+	// it is nil when no message was sent. Return None/Done/Fail to control sleep
+	// and retry behavior.
 	Handle(ctx context.Context, msg any) HandleResult
 }

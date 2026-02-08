@@ -610,6 +610,31 @@ func TestSend_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testing.T
 	<-op.StopAll()
 }
 
+func TestHandler_WhenUsingDispatcher_CanSendToOtherWorker(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: forwarder sends any message it receives to worker "receiver"
+	op := smoothoperator.NewOperator(context.Background())
+	receiver := internal.NewMessageRecorder(5 * time.Second)
+	require.NoError(t, op.AddHandler("receiver", receiver, smoothoperator.Config{}))
+	require.NoError(t, op.AddHandler("forwarder", internal.ForwarderHandler("receiver", 5*time.Second), smoothoperator.Config{}))
+	require.NoError(t, op.Start("receiver"))
+	require.NoError(t, op.Start("forwarder"))
+	time.Sleep(50 * time.Millisecond)
+
+	// Act: send to forwarder; it should forward to receiver via disp.Send
+	delivered, resultCh, err := op.Send("forwarder", "forwarded-msg")
+	require.NoError(t, err)
+	<-delivered
+	<-resultCh
+
+	// Assert: receiver got the message that forwarder sent via the dispatcher
+	<-op.StopAll()
+	msgs := receiver.Messages()
+	require.Len(t, msgs, 1, "receiver should have received one message from forwarder via Dispatcher")
+	require.Equal(t, "forwarded-msg", msgs[0])
+}
+
 func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {
 	t.Parallel()
 	// Arrange

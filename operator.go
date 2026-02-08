@@ -17,10 +17,21 @@ type Config struct {
 	PanicBackoff time.Duration
 }
 
+type Dispatcher interface {
+	// Send sends a message to the worker with the given name. If the worker is
+	// idle, it wakes up immediately. The message is passed to Handle via the msg
+	// parameter. Returns: a channel that closes once the handler has received
+	// the message; a channel that receives the handler's Result (HandleResult.Result)
+	// when the handler finishes, then closes; and an error if the worker is not found.
+	// Prefer the generic SendMessage function for type-safe sending.
+	Send(name string, msg any) (delivered <-chan struct{}, result <-chan any, err error)
+}
+
 // Operator manages a set of named workers. Register handlers with AddHandler,
 // then start/stop workers by name or all at once. All methods are safe for
 // concurrent use.
 type Operator interface {
+	Dispatcher
 	// AddHandler registers a handler under the given name with the given config.
 	// Returns an error if name is already registered.
 	AddHandler(name string, handler Handler, config Config) error
@@ -36,13 +47,6 @@ type Operator interface {
 	// RemoveHandler stops the worker with the given name (if running), waits for it
 	// to finish, and removes it from the operator. Returns error if name not found.
 	RemoveHandler(name string) error
-	// Send sends a message to the worker with the given name. If the worker is
-	// idle, it wakes up immediately. The message is passed to Handle via the msg
-	// parameter. Returns: a channel that closes once the handler has received
-	// the message; a channel that receives the handler's Result (HandleResult.Result)
-	// when the handler finishes, then closes; and an error if the worker is not found.
-	// Prefer the generic SendMessage function for type-safe sending.
-	Send(name string, msg any) (delivered <-chan struct{}, result <-chan any, err error)
 	// Status returns the current status of the worker with the given name.
 	// Returns error if name not found.
 	Status(name string) (Status, error)
@@ -73,6 +77,9 @@ func (op *operator) AddHandler(name string, handler Handler, config Config) erro
 	}
 
 	op.workers[name] = newWorker(name, handler, config)
+	if aware, ok := handler.(DispatcherAware); ok {
+		aware.SetDispatcher(op)
+	}
 	return nil
 }
 
