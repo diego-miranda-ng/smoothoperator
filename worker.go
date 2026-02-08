@@ -141,6 +141,7 @@ func (w *worker) handle(ctx context.Context) {
 	}
 
 	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+	w.sendResultToEnvelope(raw, result)
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
 		select {
@@ -148,7 +149,8 @@ func (w *worker) handle(ctx context.Context) {
 			return
 		case raw := <-w.msgCh:
 			// Woken up by an incoming message; execute the handler immediately.
-			w.executeHandler(ctx, w.unwrapEnvelope(raw))
+			result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+			w.sendResultToEnvelope(raw, result)
 		case <-time.After(result.IdleDuration):
 		}
 	}
@@ -162,6 +164,15 @@ func (w *worker) unwrapEnvelope(env envelope) any {
 		close(env.delivered)
 	}
 	return env.msg
+}
+
+// sendResultToEnvelope sends the handler's Result to the envelope's result channel,
+// then closes it. No-op when env.resultCh is nil (no message was received).
+func (w *worker) sendResultToEnvelope(env envelope, result HandleResult) {
+	if env.resultCh != nil {
+		env.resultCh <- result.Result
+		close(env.resultCh)
+	}
 }
 
 // executeHandler calls the handler's Handle method and logs any failure error.

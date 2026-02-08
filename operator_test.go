@@ -392,11 +392,12 @@ func TestSend_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	op := smoothoperator.NewOperator(context.Background())
 
 	// Act
-	ch, err := op.Send("missing", "hello")
+	delivered, result, err := op.Send("missing", "hello")
 
 	// Assert
 	require.Error(t, err)
-	require.Nil(t, ch)
+	require.Nil(t, delivered)
+	require.Nil(t, result)
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -407,11 +408,12 @@ func TestSendMessage_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	op := smoothoperator.NewOperator(context.Background())
 
 	// Act
-	ch, err := smoothoperator.SendMessage[string](op, "missing", "hello")
+	delivered, result, err := smoothoperator.SendMessage[string](op, "missing", "hello")
 
 	// Assert
 	require.Error(t, err)
-	require.Nil(t, ch)
+	require.Nil(t, delivered)
+	require.Nil(t, result)
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -426,7 +428,7 @@ func TestSend_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // let worker start and enter idle
 
 	// Act
-	delivered, err := op.Send("w", "hello")
+	delivered, resultCh, err := op.Send("w", "hello")
 	require.NoError(t, err)
 
 	// Assert: delivered channel closes promptly
@@ -435,6 +437,8 @@ func TestSend_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("message was not delivered within timeout")
 	}
+	// result channel closes after handler finishes (MessageRecorder returns Done() with no Result)
+	<-resultCh
 
 	<-op.StopAll()
 	msgs := recorder.Messages()
@@ -453,7 +457,7 @@ func TestSendMessage_WhenWorkerRunning_ShouldDeliverTypedMessage(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
-	delivered, err := smoothoperator.SendMessage[string](op, "w", "typed-data")
+	delivered, resultCh, err := smoothoperator.SendMessage[string](op, "w", "typed-data")
 	require.NoError(t, err)
 
 	select {
@@ -461,6 +465,7 @@ func TestSendMessage_WhenWorkerRunning_ShouldDeliverTypedMessage(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("message was not delivered within timeout")
 	}
+	<-resultCh
 
 	<-op.StopAll()
 
@@ -484,7 +489,7 @@ func TestSend_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
 
 	// Act: send a message — should wake the worker from idle
 	start := time.Now()
-	delivered, err := op.Send("w", "wake-up")
+	delivered, resultCh, err := op.Send("w", "wake-up")
 	require.NoError(t, err)
 
 	select {
@@ -492,6 +497,7 @@ func TestSend_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("message was not delivered within timeout; worker may not have woken from idle")
 	}
+	<-resultCh
 	elapsed := time.Since(start)
 
 	<-op.StopAll()
@@ -515,13 +521,14 @@ func TestSend_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
 
 	// Act: send 3 messages sequentially, waiting for each to be delivered
 	for i := 0; i < 3; i++ {
-		delivered, err := op.Send("w", fmt.Sprintf("msg-%d", i))
+		delivered, resultCh, err := op.Send("w", fmt.Sprintf("msg-%d", i))
 		require.NoError(t, err)
 		select {
 		case <-delivered:
 		case <-time.After(2 * time.Second):
 			t.Fatalf("message %d was not delivered within timeout", i)
 		}
+		<-resultCh
 	}
 
 	<-op.StopAll()
@@ -545,21 +552,23 @@ func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) 
 	time.Sleep(50 * time.Millisecond)
 
 	// Act: send string then int via the generic SendMessage function
-	d1, err := smoothoperator.SendMessage[string](op, "w", "hello")
+	delivered1, result1, err := smoothoperator.SendMessage[string](op, "w", "hello")
 	require.NoError(t, err)
 	select {
-	case <-d1:
+	case <-delivered1:
 	case <-time.After(2 * time.Second):
 		t.Fatal("string message not delivered")
 	}
+	<-result1
 
-	d2, err := smoothoperator.SendMessage[int](op, "w", 42)
+	delivered2, result2, err := smoothoperator.SendMessage[int](op, "w", 42)
 	require.NoError(t, err)
 	select {
-	case <-d2:
+	case <-delivered2:
 	case <-time.After(2 * time.Second):
 		t.Fatal("int message not delivered")
 	}
+	<-result2
 
 	<-op.StopAll()
 
@@ -576,6 +585,31 @@ func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) 
 	require.Equal(t, 42, intMsg.Data)
 }
 
+func TestSend_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: handler that returns DoneWithResult when it receives a message
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("w", internal.ResultHandler(5*time.Second, "handler-done"), smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond)
+
+	// Act
+	delivered, resultCh, err := op.Send("w", "trigger")
+	require.NoError(t, err)
+
+	<-delivered
+	result, open := <-resultCh
+
+	// Assert: result channel receives the handler's Result, then closes
+	require.True(t, open, "result channel should deliver one value before closing")
+	require.Equal(t, "handler-done", result)
+	_, open = <-resultCh
+	require.False(t, open, "result channel should be closed after sending result")
+
+	<-op.StopAll()
+}
+
 func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -584,12 +618,15 @@ func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration
 	// Act
 	noneResult := smoothoperator.None(time.Second)
 	doneResult := smoothoperator.Done()
+	doneWithResult := smoothoperator.DoneWithResult("payload")
 	failResult := smoothoperator.Fail(e, 2*time.Second)
 
 	// Assert
 	require.Equal(t, smoothoperator.HandleStatusNone, noneResult.Status)
 	require.Equal(t, time.Second, noneResult.IdleDuration)
 	require.Equal(t, smoothoperator.HandleStatusDone, doneResult.Status)
+	require.Equal(t, smoothoperator.HandleStatusDone, doneWithResult.Status)
+	require.Equal(t, "payload", doneWithResult.Result)
 	require.Equal(t, smoothoperator.HandleStatusFail, failResult.Status)
 	require.Equal(t, e, failResult.Err)
 	require.Equal(t, 2*time.Second, failResult.IdleDuration)

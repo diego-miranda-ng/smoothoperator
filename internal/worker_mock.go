@@ -145,6 +145,30 @@ func (h *MessageRecorder) Messages() []any {
 	return cp
 }
 
+// ResultHandler returns a Handler that, when it receives a non-nil message,
+// returns DoneWithResult with the given result. When msg is nil it idles.
+// Used to test the result channel returned by Send.
+func ResultHandler(idle time.Duration, result any) smoothoperator.Handler {
+	return &resultHandler{idle: idle, result: result}
+}
+
+type resultHandler struct {
+	idle   time.Duration
+	result any
+}
+
+func (h *resultHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
+	if msg != nil {
+		return smoothoperator.DoneWithResult(h.result)
+	}
+	select {
+	case <-ctx.Done():
+		return smoothoperator.None(0)
+	default:
+		return smoothoperator.None(h.idle)
+	}
+}
+
 // PanicHandler returns a Handler that panics on every Handle call. Used to test panic recovery.
 func PanicHandler(name string) smoothoperator.Handler {
 	return &panicHandler{name: name}
