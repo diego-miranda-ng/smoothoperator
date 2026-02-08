@@ -3,7 +3,9 @@ package internal
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
+
 	"github.com/diego-miranda-ng/smoothoperator"
 )
 
@@ -17,7 +19,7 @@ func NewHandler(name string) smoothoperator.Handler {
 	return &handlerMock{name: name}
 }
 
-func (h *handlerMock) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *handlerMock) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	fmt.Println("worker", h.name, " is working")
 	select {
 	case <-ctx.Done():
@@ -37,7 +39,7 @@ type quickHandler struct {
 	name string
 }
 
-func (h *quickHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *quickHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.None(0)
@@ -57,7 +59,7 @@ type idleHandler struct {
 	idle time.Duration
 }
 
-func (h *idleHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *idleHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.None(0)
@@ -78,7 +80,7 @@ type failHandler struct {
 	idle time.Duration
 }
 
-func (h *failHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *failHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.Done()
@@ -96,12 +98,74 @@ type noneZeroHandler struct {
 	name string
 }
 
-func (h *noneZeroHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *noneZeroHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	select {
 	case <-ctx.Done():
 		return smoothoperator.Done()
 	default:
 		return smoothoperator.None(0)
+	}
+}
+
+// MessageRecorder is a Handler that records non-nil messages received via Handle
+// and idles when no message is present. Use Messages() to inspect received messages.
+type MessageRecorder struct {
+	idle     time.Duration
+	mu       sync.Mutex
+	messages []any
+}
+
+// NewMessageRecorder returns a MessageRecorder that idles for the given duration
+// when no message is available.
+func NewMessageRecorder(idle time.Duration) *MessageRecorder {
+	return &MessageRecorder{idle: idle}
+}
+
+func (h *MessageRecorder) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
+	if msg != nil {
+		h.mu.Lock()
+		h.messages = append(h.messages, msg)
+		h.mu.Unlock()
+		return smoothoperator.Done()
+	}
+	select {
+	case <-ctx.Done():
+		return smoothoperator.None(0)
+	default:
+		return smoothoperator.None(h.idle)
+	}
+}
+
+// Messages returns a copy of all non-nil messages received by Handle.
+func (h *MessageRecorder) Messages() []any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cp := make([]any, len(h.messages))
+	copy(cp, h.messages)
+	return cp
+}
+
+// ResultHandler returns a Handler that, when it receives a non-nil message,
+// returns DoneWithResult with the given result. When msg is nil it idles.
+// Used to test the result channel returned by Send.
+func ResultHandler(idle time.Duration, result any) smoothoperator.Handler {
+	return &resultHandler{idle: idle, result: result}
+}
+
+type resultHandler struct {
+	idle   time.Duration
+	result any
+}
+
+func (h *resultHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
+	if msg != nil {
+		return smoothoperator.DoneWithResult(h.result)
+	}
+	select {
+	case <-ctx.Done():
+		return smoothoperator.None(0)
+	default:
+		return smoothoperator.None(h.idle)
 	}
 }
 
@@ -114,6 +178,6 @@ type panicHandler struct {
 	name string
 }
 
-func (h *panicHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
+func (h *panicHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	panic("panic from handler: " + h.name)
 }

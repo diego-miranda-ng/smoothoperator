@@ -32,6 +32,9 @@ type HandleResult struct {
 	IdleDuration time.Duration
 	// Err is set when Status is Fail; it can be logged by the worker. Optional.
 	Err error
+	// Result is optional data returned to the caller of Send. When set, it is sent
+	// on the result channel returned by Send after the handler finishes execution.
+	Result any
 }
 
 // None returns a HandleResult for when there was no work to do. The worker
@@ -47,6 +50,13 @@ func Done() HandleResult {
 	return HandleResult{Status: HandleStatusDone}
 }
 
+// DoneWithResult returns a HandleResult for when work was processed successfully
+// and the handler wants to return data to the caller of Send. The result is sent
+// on the result channel returned by Send after the handler finishes.
+func DoneWithResult(result any) HandleResult {
+	return HandleResult{Status: HandleStatusDone, Result: result}
+}
+
 // Fail returns a HandleResult for when the handler failed. err is stored for
 // logging; idle is the optional backoff duration before the next Handle attempt.
 // Pass 0 for idle to retry immediately.
@@ -59,6 +69,8 @@ func Fail(err error, idle time.Duration) HandleResult {
 // Handlers are registered with an Operator via AddHandler and wrapped in a Worker.
 type Handler interface {
 	// Handle performs one unit of work. It is called repeatedly by the worker until
-	// the worker is stopped. Return None/Done/Fail to control sleep and retry behavior.
-	Handle(ctx context.Context) HandleResult
+	// the worker is stopped. The msg parameter carries a message sent via SendMessage;
+	// it is nil when no message was sent. Return None/Done/Fail to control sleep and
+	// retry behavior.
+	Handle(ctx context.Context, msg any) HandleResult
 }

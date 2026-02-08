@@ -3,6 +3,7 @@ package smoothoperator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,12 +12,12 @@ import (
 
 type noopHandler struct{}
 
-func (noopHandler) Handle(context.Context) HandleResult { return Done() }
+func (noopHandler) Handle(context.Context, any) HandleResult { return Done() }
 
 // quickHandler is a test handler that yields quickly (avoids importing internal and creating import cycle).
 type quickHandler struct{ name string }
 
-func (h quickHandler) Handle(ctx context.Context) HandleResult {
+func (h quickHandler) Handle(ctx context.Context, msg any) HandleResult {
 	select {
 	case <-ctx.Done():
 		return None(0)
@@ -27,7 +28,7 @@ func (h quickHandler) Handle(ctx context.Context) HandleResult {
 
 type idleHandler struct{ idle time.Duration }
 
-func (h idleHandler) Handle(ctx context.Context) HandleResult {
+func (h idleHandler) Handle(ctx context.Context, msg any) HandleResult {
 	select {
 	case <-ctx.Done():
 		return None(0)
@@ -38,14 +39,14 @@ func (h idleHandler) Handle(ctx context.Context) HandleResult {
 
 type noneZeroHandler struct{}
 
-func (noneZeroHandler) Handle(ctx context.Context) HandleResult { return None(0) }
+func (noneZeroHandler) Handle(ctx context.Context, msg any) HandleResult { return None(0) }
 
 type failHandler struct {
 	err  error
 	idle time.Duration
 }
 
-func (h failHandler) Handle(ctx context.Context) HandleResult {
+func (h failHandler) Handle(ctx context.Context, msg any) HandleResult {
 	select {
 	case <-ctx.Done():
 		return Done()
@@ -56,7 +57,7 @@ func (h failHandler) Handle(ctx context.Context) HandleResult {
 
 type panicHandler struct{ name string }
 
-func (panicHandler) Handle(context.Context) HandleResult { panic("test panic") }
+func (panicHandler) Handle(context.Context, any) HandleResult { panic("test panic") }
 
 func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 	t.Parallel()
@@ -154,4 +155,133 @@ func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	require.Equal(t, StatusStopped, w.getStatus())
+}
+
+// --- message recording handler (internal) ---
+
+// msgRecordHandler records non-nil messages and idles when none available.
+type msgRecordHandler struct {
+	idle     time.Duration
+	mu       sync.Mutex
+	messages []any
+}
+
+func (h *msgRecordHandler) Handle(ctx context.Context, msg any) HandleResult {
+	if msg != nil {
+		h.mu.Lock()
+		h.messages = append(h.messages, msg)
+		h.mu.Unlock()
+		return Done()
+	}
+	select {
+	case <-ctx.Done():
+		return None(0)
+	default:
+		return None(h.idle)
+	}
+}
+
+func (h *msgRecordHandler) getMessages() []any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cp := make([]any, len(h.messages))
+	copy(cp, h.messages)
+	return cp
+}
+
+// --- message tests ---
+
+func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
+	t.Parallel()
+	h := &msgRecordHandler{idle: 5 * time.Second}
+	w := newWorker("w", h, Config{})
+	ctx := context.Background()
+	require.NoError(t, w.Start(ctx))
+	time.Sleep(50 * time.Millisecond) // let worker enter idle
+
+	// Send a message via the channel
+	env := envelope{msg: "direct-msg", delivered: make(chan struct{})}
+	w.msgCh <- env
+
+	// Wait for delivery
+	select {
+	case <-env.delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message not delivered within timeout")
+	}
+	<-w.Stop(ctx)
+
+	msgs := h.getMessages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "direct-msg", msgs[0])
+}
+
+func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
+	t.Parallel()
+	h := &msgRecordHandler{idle: 10 * time.Second}
+	w := newWorker("w", h, Config{})
+	ctx := context.Background()
+	require.NoError(t, w.Start(ctx))
+	time.Sleep(50 * time.Millisecond) // ensure worker enters idle
+
+	env := envelope{msg: "wake-msg", delivered: make(chan struct{})}
+	start := time.Now()
+	w.msgCh <- env
+
+	select {
+	case <-env.delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message not delivered; worker may not have woken from idle")
+	}
+	elapsed := time.Since(start)
+	<-w.Stop(ctx)
+
+	require.Less(t, elapsed, 2*time.Second, "worker should wake from idle immediately on message")
+	msgs := h.getMessages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "wake-msg", msgs[0])
+}
+
+func TestUnwrapEnvelope_WhenZeroValue_ShouldReturnNilWithoutPanic(t *testing.T) {
+	t.Parallel()
+	w := newWorker("w", noopHandler{}, Config{})
+
+	require.NotPanics(t, func() {
+		msg := w.unwrapEnvelope(envelope{})
+		require.Nil(t, msg)
+	})
+}
+
+func TestUnwrapEnvelope_WhenValid_ShouldCloseDeliveredAndReturnMsg(t *testing.T) {
+	t.Parallel()
+	w := newWorker("w", noopHandler{}, Config{})
+
+	delivered := make(chan struct{})
+	env := envelope{msg: "payload", delivered: delivered}
+
+	// Act
+	msg := w.unwrapEnvelope(env)
+
+	// Assert
+	require.Equal(t, "payload", msg)
+	select {
+	case <-delivered:
+		// channel was closed — expected
+	default:
+		t.Fatal("delivered channel should have been closed")
+	}
+}
+
+func TestWorker_WhenNoMessage_ShouldPassNilToHandler(t *testing.T) {
+	t.Parallel()
+	h := &msgRecordHandler{idle: 15 * time.Millisecond}
+	w := newWorker("w", h, Config{})
+	ctx := context.Background()
+	require.NoError(t, w.Start(ctx))
+	// Let the worker loop several times without any messages
+	time.Sleep(80 * time.Millisecond)
+	<-w.Stop(ctx)
+
+	// Handler should never have recorded a message (all calls had msg == nil)
+	require.Empty(t, h.getMessages())
 }
