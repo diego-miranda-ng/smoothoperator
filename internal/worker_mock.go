@@ -147,7 +147,7 @@ func (h *MessageRecorder) Messages() []any {
 
 // ResultHandler returns a Handler that, when it receives a non-nil message,
 // returns DoneWithResult with the given result. When msg is nil it idles.
-// Used to test the result channel returned by Send.
+// Used to test the result channel returned by Dispatch.
 func ResultHandler(idle time.Duration, result any) smoothoperator.Handler {
 	return &resultHandler{idle: idle, result: result}
 }
@@ -186,7 +186,7 @@ func (h *forwarderHandler) SetDispatcher(disp smoothoperator.Dispatcher) { h.dis
 
 func (h *forwarderHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	if msg != nil && h.dispatcher != nil {
-		_, _, _ = h.dispatcher.Send(h.target, msg)
+		_, _, _ = h.dispatcher.Dispatch(h.target, msg)
 		return smoothoperator.Done()
 	}
 	select {

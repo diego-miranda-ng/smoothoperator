@@ -383,16 +383,16 @@ func TestStatus_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
-// --- Send / SendMessage tests ---
+// --- Dispatch / SendMessage tests ---
 
-func TestSend_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+func TestDispatch_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 
 	// Act
-	delivered, result, err := op.Send("missing", "hello")
+	delivered, result, err := op.Dispatch("missing", "hello")
 
 	// Assert
 	require.Error(t, err)
@@ -417,7 +417,7 @@ func TestSendMessage_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
-func TestSend_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) {
+func TestDispatch_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -428,7 +428,7 @@ func TestSend_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // let worker start and enter idle
 
 	// Act
-	delivered, resultCh, err := op.Send("w", "hello")
+	delivered, resultCh, err := op.Dispatch("w", "hello")
 	require.NoError(t, err)
 
 	// Assert: delivered channel closes promptly
@@ -477,7 +477,7 @@ func TestSendMessage_WhenWorkerRunning_ShouldDeliverTypedMessage(t *testing.T) {
 	require.Equal(t, "typed-data", m.Data)
 }
 
-func TestSend_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
+func TestDispatch_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
 	t.Parallel()
 
 	// Arrange: worker with a very long idle so it's guaranteed to be sleeping
@@ -489,7 +489,7 @@ func TestSend_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
 
 	// Act: send a message — should wake the worker from idle
 	start := time.Now()
-	delivered, resultCh, err := op.Send("w", "wake-up")
+	delivered, resultCh, err := op.Dispatch("w", "wake-up")
 	require.NoError(t, err)
 
 	select {
@@ -509,7 +509,7 @@ func TestSend_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
 	require.Equal(t, "wake-up", msgs[0])
 }
 
-func TestSend_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
+func TestDispatch_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -521,7 +521,7 @@ func TestSend_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
 
 	// Act: send 3 messages sequentially, waiting for each to be delivered
 	for i := 0; i < 3; i++ {
-		delivered, resultCh, err := op.Send("w", fmt.Sprintf("msg-%d", i))
+		delivered, resultCh, err := op.Dispatch("w", fmt.Sprintf("msg-%d", i))
 		require.NoError(t, err)
 		select {
 		case <-delivered:
@@ -585,7 +585,7 @@ func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) 
 	require.Equal(t, 42, intMsg.Data)
 }
 
-func TestSend_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testing.T) {
+func TestDispatch_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testing.T) {
 	t.Parallel()
 
 	// Arrange: handler that returns DoneWithResult when it receives a message
@@ -595,7 +595,7 @@ func TestSend_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testing.T
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
-	delivered, resultCh, err := op.Send("w", "trigger")
+	delivered, resultCh, err := op.Dispatch("w", "trigger")
 	require.NoError(t, err)
 
 	<-delivered
@@ -622,8 +622,8 @@ func TestHandler_WhenUsingDispatcher_CanSendToOtherWorker(t *testing.T) {
 	require.NoError(t, op.Start("forwarder"))
 	time.Sleep(50 * time.Millisecond)
 
-	// Act: send to forwarder; it should forward to receiver via disp.Send
-	delivered, resultCh, err := op.Send("forwarder", "forwarded-msg")
+	// Act: send to forwarder; it should forward to receiver via disp.Dispatch
+	delivered, resultCh, err := op.Dispatch("forwarder", "forwarded-msg")
 	require.NoError(t, err)
 	<-delivered
 	<-resultCh

@@ -18,13 +18,13 @@ type Config struct {
 }
 
 type Dispatcher interface {
-	// Send sends a message to the worker with the given name. If the worker is
+	// Dispatch sends a message to the worker with the given name. If the worker is
 	// idle, it wakes up immediately. The message is passed to Handle via the msg
 	// parameter. Returns: a channel that closes once the handler has received
 	// the message; a channel that receives the handler's Result (HandleResult.Result)
 	// when the handler finishes, then closes; and an error if the worker is not found.
 	// Prefer the generic SendMessage function for type-safe sending.
-	Send(name string, msg any) (delivered <-chan struct{}, result <-chan any, err error)
+	Dispatch(name string, msg any) (delivered <-chan struct{}, result <-chan any, err error)
 }
 
 // Operator manages a set of named workers. Register handlers with AddHandler,
@@ -98,7 +98,7 @@ func (op *operator) RemoveHandler(name string) error {
 	return nil
 }
 
-func (op *operator) Send(name string, msg any) (<-chan struct{}, <-chan any, error) {
+func (op *operator) Dispatch(name string, msg any) (<-chan struct{}, <-chan any, error) {
 	op.mu.RLock()
 	w, ok := op.workers[name]
 	op.mu.RUnlock()
