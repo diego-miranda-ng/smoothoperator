@@ -169,6 +169,34 @@ func (h *resultHandler) Handle(ctx context.Context, msg any) smoothoperator.Hand
 	}
 }
 
+// ForwarderHandler returns a Handler that forwards any non-nil message to the
+// worker named target via the Dispatcher. It implements DispatcherAware to
+// receive the dispatcher at registration. Used to test handler-to-handler messaging.
+func ForwarderHandler(target string, idle time.Duration) smoothoperator.Handler {
+	return &forwarderHandler{target: target, idle: idle}
+}
+
+type forwarderHandler struct {
+	target     string
+	idle       time.Duration
+	dispatcher smoothoperator.Dispatcher
+}
+
+func (h *forwarderHandler) SetDispatcher(disp smoothoperator.Dispatcher) { h.dispatcher = disp }
+
+func (h *forwarderHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
+	if msg != nil && h.dispatcher != nil {
+		_, _, _ = h.dispatcher.Send(h.target, msg)
+		return smoothoperator.Done()
+	}
+	select {
+	case <-ctx.Done():
+		return smoothoperator.None(0)
+	default:
+		return smoothoperator.None(h.idle)
+	}
+}
+
 // PanicHandler returns a Handler that panics on every Handle call. Used to test panic recovery.
 func PanicHandler(name string) smoothoperator.Handler {
 	return &panicHandler{name: name}
