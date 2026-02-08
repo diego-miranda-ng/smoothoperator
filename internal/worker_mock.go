@@ -3,7 +3,9 @@ package internal
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
+
 	"github.com/diego-miranda-ng/smoothoperator"
 )
 
@@ -103,6 +105,44 @@ func (h *noneZeroHandler) Handle(ctx context.Context, msg any) smoothoperator.Ha
 	default:
 		return smoothoperator.None(0)
 	}
+}
+
+// MessageRecorder is a Handler that records non-nil messages received via Handle
+// and idles when no message is present. Use Messages() to inspect received messages.
+type MessageRecorder struct {
+	idle     time.Duration
+	mu       sync.Mutex
+	messages []any
+}
+
+// NewMessageRecorder returns a MessageRecorder that idles for the given duration
+// when no message is available.
+func NewMessageRecorder(idle time.Duration) *MessageRecorder {
+	return &MessageRecorder{idle: idle}
+}
+
+func (h *MessageRecorder) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
+	if msg != nil {
+		h.mu.Lock()
+		h.messages = append(h.messages, msg)
+		h.mu.Unlock()
+		return smoothoperator.Done()
+	}
+	select {
+	case <-ctx.Done():
+		return smoothoperator.None(0)
+	default:
+		return smoothoperator.None(h.idle)
+	}
+}
+
+// Messages returns a copy of all non-nil messages received by Handle.
+func (h *MessageRecorder) Messages() []any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cp := make([]any, len(h.messages))
+	copy(cp, h.messages)
+	return cp
 }
 
 // PanicHandler returns a Handler that panics on every Handle call. Used to test panic recovery.

@@ -383,6 +383,199 @@ func TestStatus_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
+// --- Send / SendMessage tests ---
+
+func TestSend_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+
+	// Act
+	ch, err := op.Send("missing", "hello")
+
+	// Assert
+	require.Error(t, err)
+	require.Nil(t, ch)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestSendMessage_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+
+	// Act
+	ch, err := smoothoperator.SendMessage[string](op, "missing", "hello")
+
+	// Assert
+	require.Error(t, err)
+	require.Nil(t, ch)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestSend_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(5 * time.Second)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond) // let worker start and enter idle
+
+	// Act
+	delivered, err := op.Send("w", "hello")
+	require.NoError(t, err)
+
+	// Assert: delivered channel closes promptly
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message was not delivered within timeout")
+	}
+
+	<-op.StopAll()
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "hello", msgs[0])
+}
+
+func TestSendMessage_WhenWorkerRunning_ShouldDeliverTypedMessage(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(5 * time.Second)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond)
+
+	// Act
+	delivered, err := smoothoperator.SendMessage[string](op, "w", "typed-data")
+	require.NoError(t, err)
+
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message was not delivered within timeout")
+	}
+
+	<-op.StopAll()
+
+	// Assert: handler received a Message[string] with the correct Data
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 1)
+	m, ok := msgs[0].(smoothoperator.Message[string])
+	require.True(t, ok, "expected Message[string], got %T", msgs[0])
+	require.Equal(t, "typed-data", m.Data)
+}
+
+func TestSend_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: worker with a very long idle so it's guaranteed to be sleeping
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(10 * time.Second)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle
+
+	// Act: send a message — should wake the worker from idle
+	start := time.Now()
+	delivered, err := op.Send("w", "wake-up")
+	require.NoError(t, err)
+
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message was not delivered within timeout; worker may not have woken from idle")
+	}
+	elapsed := time.Since(start)
+
+	<-op.StopAll()
+
+	// Assert: message was delivered much faster than the 10s idle
+	require.Less(t, elapsed, 2*time.Second, "worker should wake from idle immediately on message")
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "wake-up", msgs[0])
+}
+
+func TestSend_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(50 * time.Millisecond)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond)
+
+	// Act: send 3 messages sequentially, waiting for each to be delivered
+	for i := 0; i < 3; i++ {
+		delivered, err := op.Send("w", fmt.Sprintf("msg-%d", i))
+		require.NoError(t, err)
+		select {
+		case <-delivered:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("message %d was not delivered within timeout", i)
+		}
+	}
+
+	<-op.StopAll()
+
+	// Assert: all 3 messages were received in order
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 3)
+	require.Equal(t, "msg-0", msgs[0])
+	require.Equal(t, "msg-1", msgs[1])
+	require.Equal(t, "msg-2", msgs[2])
+}
+
+func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(50 * time.Millisecond)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond)
+
+	// Act: send string then int via the generic SendMessage function
+	d1, err := smoothoperator.SendMessage[string](op, "w", "hello")
+	require.NoError(t, err)
+	select {
+	case <-d1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("string message not delivered")
+	}
+
+	d2, err := smoothoperator.SendMessage[int](op, "w", 42)
+	require.NoError(t, err)
+	select {
+	case <-d2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("int message not delivered")
+	}
+
+	<-op.StopAll()
+
+	// Assert: both messages arrived with correct types
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 2)
+
+	strMsg, ok := msgs[0].(smoothoperator.Message[string])
+	require.True(t, ok, "expected Message[string], got %T", msgs[0])
+	require.Equal(t, "hello", strMsg.Data)
+
+	intMsg, ok := msgs[1].(smoothoperator.Message[int])
+	require.True(t, ok, "expected Message[int], got %T", msgs[1])
+	require.Equal(t, 42, intMsg.Data)
+}
+
 func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {
 	t.Parallel()
 	// Arrange
