@@ -186,7 +186,7 @@ func (h *forwarderHandler) SetDispatcher(disp smoothoperator.Dispatcher) { h.dis
 
 func (h *forwarderHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
 	if msg != nil && h.dispatcher != nil {
-		_, _, _ = h.dispatcher.Dispatch(h.target, msg)
+		_, _, _ = h.dispatcher.Dispatch(ctx, h.target, msg)
 		return smoothoperator.Done()
 	}
 	select {
@@ -194,6 +194,25 @@ func (h *forwarderHandler) Handle(ctx context.Context, msg any) smoothoperator.H
 		return smoothoperator.None(0)
 	default:
 		return smoothoperator.None(h.idle)
+	}
+}
+
+// BlockingHandler returns a Handler that blocks in Handle for the given duration
+// (or until ctx is done), then returns Done. Used to test backpressure (buffer full).
+func BlockingHandler(blockFor time.Duration) smoothoperator.Handler {
+	return &blockingHandler{blockFor: blockFor}
+}
+
+type blockingHandler struct {
+	blockFor time.Duration
+}
+
+func (h *blockingHandler) Handle(ctx context.Context, msg any) smoothoperator.HandleResult {
+	select {
+	case <-ctx.Done():
+		return smoothoperator.Done()
+	case <-time.After(h.blockFor):
+		return smoothoperator.Done()
 	}
 }
 
