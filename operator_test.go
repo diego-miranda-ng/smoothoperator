@@ -392,7 +392,7 @@ func TestDispatch_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	op := smoothoperator.NewOperator(context.Background())
 
 	// Act
-	delivered, result, err := op.Dispatch("missing", "hello")
+	delivered, result, err := op.Dispatch(context.Background(), "missing", "hello")
 
 	// Assert
 	require.Error(t, err)
@@ -428,7 +428,7 @@ func TestDispatch_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) 
 	time.Sleep(50 * time.Millisecond) // let worker start and enter idle
 
 	// Act
-	delivered, resultCh, err := op.Dispatch("w", "hello")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "hello")
 	require.NoError(t, err)
 
 	// Assert: delivered channel closes promptly
@@ -489,7 +489,7 @@ func TestDispatch_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T)
 
 	// Act: send a message — should wake the worker from idle
 	start := time.Now()
-	delivered, resultCh, err := op.Dispatch("w", "wake-up")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "wake-up")
 	require.NoError(t, err)
 
 	select {
@@ -521,7 +521,7 @@ func TestDispatch_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
 
 	// Act: send 3 messages sequentially, waiting for each to be delivered
 	for i := 0; i < 3; i++ {
-		delivered, resultCh, err := op.Dispatch("w", fmt.Sprintf("msg-%d", i))
+		delivered, resultCh, err := op.Dispatch(context.Background(), "w", fmt.Sprintf("msg-%d", i))
 		require.NoError(t, err)
 		select {
 		case <-delivered:
@@ -595,7 +595,7 @@ func TestDispatch_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testi
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
-	delivered, resultCh, err := op.Dispatch("w", "trigger")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "trigger")
 	require.NoError(t, err)
 
 	<-delivered
@@ -623,7 +623,7 @@ func TestHandler_WhenUsingDispatcher_CanSendToOtherWorker(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Act: send to forwarder; it should forward to receiver via disp.Dispatch
-	delivered, resultCh, err := op.Dispatch("forwarder", "forwarded-msg")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "forwarder", "forwarded-msg")
 	require.NoError(t, err)
 	<-delivered
 	<-resultCh
@@ -633,6 +633,65 @@ func TestHandler_WhenUsingDispatcher_CanSendToOtherWorker(t *testing.T) {
 	msgs := receiver.Messages()
 	require.Len(t, msgs, 1, "receiver should have received one message from forwarder via Dispatcher")
 	require.Equal(t, "forwarded-msg", msgs[0])
+}
+
+func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
+	t.Parallel()
+
+	// Worker with buffer 1 and a handler that blocks so the buffer can fill
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.Config{MessageBufferSize: 1}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond)
+
+	// First message: accepted and worker is now handling it (blocking)
+	_, _, err := op.Dispatch(context.Background(), "w", "first")
+	require.NoError(t, err)
+
+	// Second message: fills the buffer (cap 1)
+	_, _, err = op.Dispatch(context.Background(), "w", "second")
+	require.NoError(t, err)
+
+	// Third message: buffer full; Dispatch with short timeout should return deadline exceeded
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, _, err = op.Dispatch(ctx, "w", "third")
+	require.Error(t, err)
+	require.EqualError(t, err, fmt.Sprintf("dispatch timeout: %s", context.DeadlineExceeded.Error()))
+
+	<-op.StopAll()
+}
+
+func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.Config{
+		MessageBufferSize:  1,
+		MaxDispatchTimeout: 50 * time.Millisecond,
+	}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(50 * time.Millisecond)
+
+	// First message: send and wait until worker has accepted it (so worker is now in handler, blocking)
+	delivered1, _, err := op.Dispatch(context.Background(), "w", "first")
+	require.NoError(t, err)
+	select {
+	case <-delivered1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first message not delivered")
+	}
+
+	// Second message: fills the buffer (worker still in handler)
+	_, _, err = op.Dispatch(context.Background(), "w", "second")
+	require.NoError(t, err)
+
+	// Third message: buffer full; send is limited by MaxDispatchTimeout (50ms), so should return deadline exceeded
+	_, _, err = op.Dispatch(context.Background(), "w", "third")
+	require.Error(t, err)
+	require.EqualError(t, err, fmt.Sprintf("dispatch timeout: %s", context.DeadlineExceeded.Error()))
+
+	<-op.StopAll()
 }
 
 func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {

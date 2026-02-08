@@ -15,16 +15,31 @@ type Config struct {
 	// PanicBackoff is the duration the worker sleeps after recovering a panic
 	// before calling Handle again. Use 0 for the default (1 second).
 	PanicBackoff time.Duration
+	// MessageBufferSize is the capacity of the worker's incoming message channel.
+	// When the buffer is full, Dispatch blocks until the worker reads a message or
+	// ctx is done. Use 0 or 1 for buffer size 1 (default). Larger values allow
+	// more messages to queue; ordering is FIFO and backpressure is applied when full.
+	MessageBufferSize int
+	// MaxDispatchTimeout is an optional maximum time to wait when sending a message
+	// to this worker. If the send would block longer (e.g. buffer full), Dispatch
+	// returns context.DeadlineExceeded. Use 0 for no timeout (default); the send
+	// is then limited only by the context passed to Dispatch.
+	MaxDispatchTimeout time.Duration
 }
 
 type Dispatcher interface {
 	// Dispatch sends a message to the worker with the given name. If the worker is
 	// idle, it wakes up immediately. The message is passed to Handle via the msg
-	// parameter. Returns: a channel that closes once the handler has received
-	// the message; a channel that receives the handler's Result (HandleResult.Result)
-	// when the handler finishes, then closes; and an error if the worker is not found.
-	// Prefer the generic SendMessage function for type-safe sending.
-	Dispatch(name string, msg any) (delivered <-chan struct{}, result <-chan any, err error)
+	// parameter. If the worker's message buffer is full, Dispatch blocks until
+	// there is space or ctx is done (e.g. timeout or cancel); on ctx.Done it
+	// returns ctx.Err() and does not send. When Config.MaxDispatchTimeout is set
+	// for the worker, the send is also bounded by that duration. Returns: a
+	// channel that closes once the handler has received the message; a channel
+	// that receives the handler's Result (HandleResult.Result) when the handler
+	// finishes, then closes; and an error if the worker is not found or ctx was
+	// cancelled (including MaxDispatchTimeout). Prefer SendMessage or
+	// SendMessageWithContext for type-safe sending.
+	Dispatch(ctx context.Context, name string, msg any) (delivered <-chan struct{}, result <-chan any, err error)
 }
 
 // Operator manages a set of named workers. Register handlers with AddHandler,
@@ -98,7 +113,7 @@ func (op *operator) RemoveHandler(name string) error {
 	return nil
 }
 
-func (op *operator) Dispatch(name string, msg any) (<-chan struct{}, <-chan any, error) {
+func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan struct{}, <-chan any, error) {
 	op.mu.RLock()
 	w, ok := op.workers[name]
 	op.mu.RUnlock()
@@ -107,13 +122,24 @@ func (op *operator) Dispatch(name string, msg any) (<-chan struct{}, <-chan any,
 		return nil, nil, fmt.Errorf("worker %s not found", name)
 	}
 
+	sendCtx := ctx
+	if max := w.getMaxDispatchTimeout(); max > 0 {
+		var cancel context.CancelFunc
+		sendCtx, cancel = context.WithTimeout(ctx, max)
+		defer cancel()
+	}
+
 	env := envelope{
 		msg:       msg,
 		delivered: make(chan struct{}),
 		resultCh:  make(chan any, 1),
 	}
-	w.msgCh <- env
-	return env.delivered, env.resultCh, nil
+	select {
+	case w.msgCh <- env:
+		return env.delivered, env.resultCh, nil
+	case <-sendCtx.Done():
+		return nil, nil, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())
+	}
 }
 
 func (op *operator) Status(name string) (Status, error) {
