@@ -26,17 +26,18 @@ const (
 // the handler in a loop in a goroutine until stopped. The Operator registers
 // handlers and starts/stops workers by name; the worker type is not exposed.
 type worker struct {
-	name                 string
-	handler              Handler
-	status               Status
-	mu                   sync.Mutex
-	cancel               context.CancelFunc
-	done                 chan struct{}
-	panicCount           int
-	maxPanicAttempts     int           // 0 means no limit
-	panicBackoff         time.Duration // 0 means use defaultPanicBackoff
-	maxDispatchTimeout   time.Duration // 0 means no timeout
-	msgCh                chan envelope // buffered channel for incoming messages
+	name               string
+	handler            Handler
+	status             Status
+	mu                 sync.Mutex
+	cancel             context.CancelFunc
+	done               chan struct{}
+	panicCount         int
+	maxPanicAttempts   int           // 0 means no limit
+	panicBackoff       time.Duration // 0 means use defaultPanicBackoff
+	maxDispatchTimeout time.Duration // 0 means no timeout
+	messageOnly        bool          // if true, only run when a message is received
+	msgCh              chan envelope // buffered channel for incoming messages
 }
 
 // newWorker creates a worker that runs the given handler under the given name
@@ -51,14 +52,15 @@ func newWorker(name string, handler Handler, config Config) *worker {
 		bufSize = 1
 	}
 	return &worker{
-		name:                 name,
-		handler:              handler,
-		status:               StatusStopped,
-		done:                 make(chan struct{}),
-		maxPanicAttempts:     config.MaxPanicAttempts,
-		panicBackoff:         backoff,
-		maxDispatchTimeout:   config.MaxDispatchTimeout,
-		msgCh:                make(chan envelope, bufSize),
+		name:               name,
+		handler:            handler,
+		status:             StatusStopped,
+		done:               make(chan struct{}),
+		maxPanicAttempts:   config.MaxPanicAttempts,
+		panicBackoff:       backoff,
+		maxDispatchTimeout: config.MaxDispatchTimeout,
+		messageOnly:        config.MessageOnly,
+		msgCh:              make(chan envelope, bufSize),
 	}
 }
 
@@ -105,13 +107,10 @@ func (w *worker) Start(ctx context.Context) error {
 	go func() {
 		defer close(w.done)
 		defer w.setStatus(StatusStopped)
-		for {
-			select {
-			case <-workerCtx.Done():
-				return
-			default:
-				w.handle(workerCtx)
-			}
+		if w.messageOnly {
+			w.runMessageOnly(workerCtx)
+		} else {
+			w.runLoop(workerCtx)
 		}
 	}()
 
@@ -135,15 +134,46 @@ func (w *worker) Stop(ctx context.Context) chan struct{} {
 	return w.done
 }
 
+// runLoop runs the worker in polling mode: Handle is called repeatedly, with or without a message.
+func (w *worker) runLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			w.handle(ctx)
+		}
+	}
+}
+
+// runMessageOnly runs the worker in message-only mode: Handle is called only when a message is received.
+func (w *worker) runMessageOnly(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case raw := <-w.msgCh:
+			w.processEnvelope(ctx, raw)
+		}
+	}
+}
+
+// processEnvelope runs the handler for one envelope (with panic recovery) and sends the result.
+// Caller must not hold w.mu. Returns the HandleResult for use by handle() when checking IdleDuration.
+func (w *worker) processEnvelope(ctx context.Context, raw envelope) HandleResult {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	defer w.onPanicRecovered(ctx)
+
+	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+	w.sendResultToEnvelope(raw, result)
+	return result
+}
+
 func (w *worker) handle(ctx context.Context) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
-	defer func() {
-		if v := recover(); v != nil {
-			w.onPanicRecovered(ctx, v)
-		}
-	}()
+	defer w.onPanicRecovered(ctx)
 
 	// Non-blocking check for a pending message.
 	var raw envelope
@@ -198,7 +228,12 @@ func (w *worker) executeHandler(ctx context.Context, msg any) HandleResult {
 
 // onPanicRecovered is run from a defer in handle() after recovering a panic.
 // Caller holds w.mu. It logs, increments count, stops if max reached, and does backoff (releasing lock during sleep).
-func (w *worker) onPanicRecovered(ctx context.Context, v interface{}) {
+func (w *worker) onPanicRecovered(ctx context.Context) {
+	var v interface{}
+	if v = recover(); v == nil {
+		return
+	}
+
 	err := panicToError(v)
 	w.panicCount++
 	log.Printf("worker %s: panic recovered (attempt %d): %v", w.name, w.panicCount, err)

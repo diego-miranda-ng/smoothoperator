@@ -694,6 +694,74 @@ func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *tes
 	<-op.StopAll()
 }
 
+func TestMessageOnly_WhenNoMessageSent_ShouldNeverCallHandler(t *testing.T) {
+	t.Parallel()
+
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(5 * time.Second)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true}))
+	require.NoError(t, op.Start("w"))
+
+	// Let the worker run for a bit without any message
+	time.Sleep(100 * time.Millisecond)
+
+	<-op.StopAll()
+	msgs := recorder.Messages()
+	require.Empty(t, msgs, "Handle should never be called when MessageOnly and no message is dispatched")
+}
+
+func TestMessageOnly_WhenMessageSent_ShouldCallHandlerWithMessage(t *testing.T) {
+	t.Parallel()
+
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(5 * time.Second)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(20 * time.Millisecond)
+
+	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "hello")
+	require.NoError(t, err)
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message not delivered")
+	}
+	<-resultCh
+
+	<-op.StopAll()
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "hello", msgs[0])
+}
+
+func TestMessageOnly_WhenMultipleMessagesSent_ShouldDeliverAllInOrder(t *testing.T) {
+	t.Parallel()
+
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(50 * time.Millisecond)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true}))
+	require.NoError(t, op.Start("w"))
+	time.Sleep(20 * time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		delivered, resultCh, err := op.Dispatch(context.Background(), "w", fmt.Sprintf("msg-%d", i))
+		require.NoError(t, err)
+		select {
+		case <-delivered:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("message %d not delivered", i)
+		}
+		<-resultCh
+	}
+
+	<-op.StopAll()
+	msgs := recorder.Messages()
+	require.Len(t, msgs, 3)
+	require.Equal(t, "msg-0", msgs[0])
+	require.Equal(t, "msg-1", msgs[1])
+	require.Equal(t, "msg-2", msgs[2])
+}
+
 func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration(t *testing.T) {
 	t.Parallel()
 	// Arrange
