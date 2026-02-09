@@ -25,6 +25,11 @@ type Config struct {
 	// returns context.DeadlineExceeded. Use 0 for no timeout (default); the send
 	// is then limited only by the context passed to Dispatch.
 	MaxDispatchTimeout time.Duration
+	// MessageOnly, when true, makes the worker run only when a message is received.
+	// Handle is never called with nil; the worker blocks on the message channel
+	// until a message is dispatched. When false (default), the worker runs in a
+	// loop and Handle is called even with no message (msg == nil), as today.
+	MessageOnly bool
 }
 
 type Dispatcher interface {
