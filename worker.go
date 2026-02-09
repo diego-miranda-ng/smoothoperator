@@ -26,41 +26,31 @@ const (
 // the handler in a loop in a goroutine until stopped. The Operator registers
 // handlers and starts/stops workers by name; the worker type is not exposed.
 type worker struct {
-	name               string
-	handler            Handler
-	status             Status
-	mu                 sync.Mutex
-	cancel             context.CancelFunc
-	done               chan struct{}
-	panicCount         int
-	maxPanicAttempts   int           // 0 means no limit
-	panicBackoff       time.Duration // 0 means use defaultPanicBackoff
-	maxDispatchTimeout time.Duration // 0 means no timeout
-	messageOnly        bool          // if true, only run when a message is received
-	msgCh              chan envelope // buffered channel for incoming messages
+	name       string
+	handler    Handler
+	config     Config
+	status     Status
+	mu         sync.Mutex
+	cancel     context.CancelFunc
+	done       chan struct{}
+	panicCount int
+	msgCh      chan envelope // buffered channel for incoming messages
 }
 
 // newWorker creates a worker that runs the given handler under the given name
 // with the given config. The worker starts in StatusStopped; call Start to run it.
 func newWorker(name string, handler Handler, config Config) *worker {
-	backoff := config.PanicBackoff
-	if backoff <= 0 {
-		backoff = defaultPanicBackoff
-	}
 	bufSize := config.MessageBufferSize
 	if bufSize <= 0 {
 		bufSize = 1
 	}
 	return &worker{
-		name:               name,
-		handler:            handler,
-		status:             StatusStopped,
-		done:               make(chan struct{}),
-		maxPanicAttempts:   config.MaxPanicAttempts,
-		panicBackoff:       backoff,
-		maxDispatchTimeout: config.MaxDispatchTimeout,
-		messageOnly:        config.MessageOnly,
-		msgCh:              make(chan envelope, bufSize),
+		name:     name,
+		handler:  handler,
+		config:   config,
+		status:   StatusStopped,
+		done:     make(chan struct{}),
+		msgCh:    make(chan envelope, bufSize),
 	}
 }
 
@@ -84,7 +74,15 @@ func (w *worker) setStatus(s Status) {
 // getMaxDispatchTimeout returns the worker's max dispatch timeout (0 means no limit).
 // Safe to call from any goroutine; the value is set at construction and never changed.
 func (w *worker) getMaxDispatchTimeout() time.Duration {
-	return w.maxDispatchTimeout
+	return w.config.MaxDispatchTimeout
+}
+
+// getPanicBackoff returns the effective panic backoff duration (config value or default).
+func (w *worker) getPanicBackoff() time.Duration {
+	if w.config.PanicBackoff > 0 {
+		return w.config.PanicBackoff
+	}
+	return defaultPanicBackoff
 }
 
 // Start starts the worker loop in a new goroutine. The loop runs until ctx is
@@ -107,7 +105,7 @@ func (w *worker) Start(ctx context.Context) error {
 	go func() {
 		defer close(w.done)
 		defer w.setStatus(StatusStopped)
-		if w.messageOnly {
+		if w.config.MessageOnly {
 			w.runMessageOnly(workerCtx)
 		} else {
 			w.runLoop(workerCtx)
@@ -238,8 +236,8 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	w.panicCount++
 	log.Printf("worker %s: panic recovered (attempt %d): %v", w.name, w.panicCount, err)
 
-	if w.maxPanicAttempts > 0 && w.panicCount >= w.maxPanicAttempts {
-		log.Printf("worker %s: max panic attempts (%d) reached, stopping", w.name, w.maxPanicAttempts)
+	if w.config.MaxPanicAttempts > 0 && w.panicCount >= w.config.MaxPanicAttempts {
+		log.Printf("worker %s: max panic attempts (%d) reached, stopping", w.name, w.config.MaxPanicAttempts)
 		w.cancel()
 		return
 	}
@@ -247,7 +245,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	w.mu.Unlock()
 	select {
 	case <-ctx.Done():
-	case <-time.After(w.panicBackoff):
+	case <-time.After(w.getPanicBackoff()):
 	}
 	w.mu.Lock()
 }
