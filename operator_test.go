@@ -783,3 +783,118 @@ func TestHandleResult_WhenUsingConstructors_ShouldReturnCorrectStatusAndDuration
 	require.Equal(t, e, failResult.Err)
 	require.Equal(t, 2*time.Second, failResult.IdleDuration)
 }
+
+// --- Metrics tests ---
+
+func TestWorker_WhenNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.Worker("missing")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorker_LastMetric_WhenNoEvents_ShouldReturnFalse(t *testing.T) {
+	t.Parallel()
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{}))
+	w, err := op.Worker("w")
+	require.NoError(t, err)
+	_, ok := w.LastMetric()
+	require.False(t, ok)
+}
+
+func TestWorker_LastMetric_WhenWorkerRuns_ShouldReturnLatestEvent(t *testing.T) {
+	t.Parallel()
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{}))
+	require.NoError(t, op.Start("w"))
+	defer func() { <-op.StopAll() }()
+	time.Sleep(50 * time.Millisecond)
+
+	w, err := op.Worker("w")
+	require.NoError(t, err)
+	ev, ok := w.LastMetric()
+	require.True(t, ok)
+	require.Equal(t, smoothoperator.MetricKindHandle, ev.Kind)
+	require.Equal(t, "w", ev.Worker)
+	require.Equal(t, smoothoperator.HandleStatusDone, ev.Status)
+}
+
+func TestWorker_Metrics_WhenReceiving_ShouldReceiveEventsThenClose(t *testing.T) {
+	t.Parallel()
+	op := smoothoperator.NewOperator(context.Background())
+	recorder := internal.NewMessageRecorder(5 * time.Second)
+	require.NoError(t, op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true}))
+	w, err := op.Worker("w")
+	require.NoError(t, err)
+	ch := w.Metrics()
+	var got []smoothoperator.MetricEvent
+	done := make(chan struct{})
+	go func() {
+		for ev := range ch {
+			got = append(got, ev)
+		}
+		close(done)
+	}()
+	require.NoError(t, op.Start("w"))
+	time.Sleep(20 * time.Millisecond)
+	_, _, _ = op.Dispatch(context.Background(), "w", "hello")
+	time.Sleep(50 * time.Millisecond)
+	<-op.StopAll()
+	<-done
+
+	require.NotEmpty(t, got)
+	var hasLifecycleStarted, hasLifecycleStopped, hasHandle, hasDispatch bool
+	for _, ev := range got {
+		switch ev.Kind {
+		case smoothoperator.MetricKindLifecycle:
+			if ev.LifecycleEvent == "started" {
+				hasLifecycleStarted = true
+			}
+			if ev.LifecycleEvent == "stopped" {
+				hasLifecycleStopped = true
+			}
+		case smoothoperator.MetricKindHandle:
+			hasHandle = true
+		case smoothoperator.MetricKindDispatch:
+			hasDispatch = true
+		}
+	}
+	require.True(t, hasLifecycleStarted, "expected at least one lifecycle started")
+	require.True(t, hasLifecycleStopped, "expected lifecycle stopped after StopAll")
+	require.True(t, hasHandle, "expected at least one handle event")
+	require.True(t, hasDispatch, "expected at least one dispatch event")
+}
+
+func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
+	t.Parallel()
+	op := smoothoperator.NewOperator(context.Background())
+	require.NoError(t, op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{}))
+	w, _ := op.Worker("w")
+	ch := w.Metrics()
+	var got []smoothoperator.MetricEvent
+	done := make(chan struct{})
+	go func() {
+		for ev := range ch {
+			got = append(got, ev)
+		}
+		close(done)
+	}()
+	require.NoError(t, op.Start("w"))
+	time.Sleep(20 * time.Millisecond)
+	_, _, err := op.Dispatch(context.Background(), "w", "ping")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+	<-op.StopAll()
+	<-done
+
+	var hasDispatchOk bool
+	for _, ev := range got {
+		if ev.Kind == smoothoperator.MetricKindDispatch && ev.DispatchOk {
+			hasDispatchOk = true
+			break
+		}
+	}
+	require.True(t, hasDispatchOk, "expected at least one successful dispatch event in stream")
+}

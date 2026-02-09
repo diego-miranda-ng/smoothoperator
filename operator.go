@@ -70,6 +70,9 @@ type Operator interface {
 	// Status returns the current status of the worker with the given name.
 	// Returns error if name not found.
 	Status(name string) (Status, error)
+	// Worker returns the Worker interface for the given name, for metrics (Metrics channel and LastMetric).
+	// Returns error if name not found.
+	Worker(name string) (Worker, error)
 }
 
 type operator struct {
@@ -141,8 +144,10 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 	}
 	select {
 	case w.msgCh <- env:
+		w.metrics.Record(w.metrics.dispatchEvent(true, nil))
 		return env.delivered, env.resultCh, nil
 	case <-sendCtx.Done():
+		w.metrics.Record(w.metrics.dispatchEvent(false, sendCtx.Err()))
 		return nil, nil, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())
 	}
 }
@@ -156,6 +161,17 @@ func (op *operator) Status(name string) (Status, error) {
 		return "", fmt.Errorf("worker %s not found", name)
 	}
 	return w.getStatus(), nil
+}
+
+func (op *operator) Worker(name string) (Worker, error) {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
+
+	w, ok := op.workers[name]
+	if !ok {
+		return nil, fmt.Errorf("worker %s not found", name)
+	}
+	return &w.metrics, nil
 }
 
 func (op *operator) Start(name string) error {
