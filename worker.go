@@ -22,6 +22,19 @@ const (
 	StatusStopped Status = "stopped"
 )
 
+// Worker is the metrics view of a worker. Obtain it from Operator.AddHandler or
+// Operator.Worker(name). Metrics are only collected after Metrics() or LastMetric()
+// is used; the channel is created lazily on first Metrics() call.
+type Worker interface {
+	// Metrics returns a channel that receives metric events for this worker.
+	// The channel is created on first call and closed when the worker stops.
+	// Receive in a dedicated goroutine to avoid blocking the worker.
+	Metrics() <-chan MetricEvent
+	// LastMetric returns the most recent metric event and true, or a zero value and false
+	// if no event has been recorded yet.
+	LastMetric() (MetricEvent, bool)
+}
+
 // worker wraps a Handler and manages its state, status, and lifecycle. It runs
 // the handler in a loop in a goroutine until stopped. The Operator registers
 // handlers and starts/stops workers by name; the worker type is not exposed.
@@ -35,6 +48,8 @@ type worker struct {
 	done       chan struct{}
 	panicCount int
 	msgCh      chan envelope // buffered channel for incoming messages
+
+	metrics metricsRecorder
 }
 
 // newWorker creates a worker that runs the given handler under the given name
@@ -45,12 +60,13 @@ func newWorker(name string, handler Handler, config Config) *worker {
 		bufSize = 1
 	}
 	return &worker{
-		name:     name,
-		handler:  handler,
-		config:   config,
-		status:   StatusStopped,
-		done:     make(chan struct{}),
-		msgCh:    make(chan envelope, bufSize),
+		name:    name,
+		handler: handler,
+		config:  config,
+		status:  StatusStopped,
+		done:    make(chan struct{}),
+		msgCh:   make(chan envelope, bufSize),
+		metrics: newMetricsRecorder(name),
 	}
 }
 
@@ -105,6 +121,8 @@ func (w *worker) Start(ctx context.Context) error {
 	go func() {
 		defer close(w.done)
 		defer w.setStatus(StatusStopped)
+		defer w.emitStoppedAndCloseMetrics()
+		w.metrics.Record(w.metrics.lifecycleEvent("started"))
 		if w.config.MessageOnly {
 			w.runMessageOnly(workerCtx)
 		} else {
@@ -163,8 +181,10 @@ func (w *worker) processEnvelope(ctx context.Context, raw envelope) HandleResult
 	defer w.mu.Unlock()
 	defer w.onPanicRecovered(ctx)
 
+	start := time.Now()
 	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
 	w.sendResultToEnvelope(raw, result)
+	w.metrics.Record(w.metrics.handleEvent(result, time.Since(start), true))
 	return result
 }
 
@@ -180,8 +200,11 @@ func (w *worker) handle(ctx context.Context) {
 	default:
 	}
 
+	hadMessage := raw.resultCh != nil
+	start := time.Now()
 	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
 	w.sendResultToEnvelope(raw, result)
+	w.metrics.Record(w.metrics.handleEvent(result, time.Since(start), hadMessage))
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
 		select {
@@ -189,8 +212,10 @@ func (w *worker) handle(ctx context.Context) {
 			return
 		case raw := <-w.msgCh:
 			// Woken up by an incoming message; execute the handler immediately.
+			start := time.Now()
 			result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
 			w.sendResultToEnvelope(raw, result)
+			w.metrics.Record(w.metrics.handleEvent(result, time.Since(start), true))
 		case <-time.After(result.IdleDuration):
 		}
 	}
@@ -234,6 +259,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 
 	err := panicToError(v)
 	w.panicCount++
+	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
 	log.Printf("worker %s: panic recovered (attempt %d): %v", w.name, w.panicCount, err)
 
 	if w.config.MaxPanicAttempts > 0 && w.panicCount >= w.config.MaxPanicAttempts {
@@ -256,4 +282,11 @@ func panicToError(v interface{}) error {
 		return err
 	}
 	return fmt.Errorf("panic: %v", v)
+}
+
+// emitStoppedAndCloseMetrics emits a lifecycle "stopped" event then closes the metrics channel.
+// Called from the worker goroutine when the run loop exits.
+func (w *worker) emitStoppedAndCloseMetrics() {
+	w.metrics.Record(w.metrics.lifecycleEvent("stopped"))
+	w.metrics.CloseChannel()
 }

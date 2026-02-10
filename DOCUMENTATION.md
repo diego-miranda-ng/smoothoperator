@@ -12,9 +12,10 @@ This document describes all exported types and methods of the `smoothoperator` p
 1. [Overview](#overview)
 2. [Operator](#operator)
 3. [Workers (internal)](#workers-internal)
-4. [Handler and HandleResult](#handler-and-handleresult)
-5. [Constants and types](#constants-and-types)
-6. [Usage examples](#usage-examples)
+4. [Metrics and Worker](#metrics-and-worker)
+5. [Handler and HandleResult](#handler-and-handleresult)
+6. [Constants and types](#constants-and-types)
+7. [Usage examples](#usage-examples)
 
 ---
 
@@ -39,12 +40,13 @@ The **Operator** manages a set of named workers. You register handlers, then sta
 
 ```go
 type Operator interface {
-    AddHandler(name string, handler Handler, config Config) error
+    AddHandler(name string, handler Handler, config Config) (Worker, error)
     Start(name string) error
     StartAll() error
     Stop(name string) (chan struct{}, error)
     StopAll() chan struct{}
     Status(name string) (Status, error)
+    Worker(name string) (Worker, error)
 }
 ```
 
@@ -72,15 +74,17 @@ Creates an Operator that uses `ctx` for worker lifecycle. Workers started via th
 
 ### Methods
 
-#### `AddHandler(name string, handler Handler, config Config) error`
+#### `AddHandler(name string, handler Handler, config Config) (Worker, error)`
 
-Registers a handler under the given name with the given config. The worker is not started; call `Start` or `StartAll` to run it. Workers are not exposed; use `Status(name)` to query state.
+Registers a handler under the given name with the given config. The worker is not started; call `Start` or `StartAll` to run it. Returns the **Worker** interface for metrics access (see [Metrics and Worker](#metrics-and-worker)).
 
 - **Parameters:**
   - `name` – unique identifier for this worker.
   - `handler` – implementation of `Handler` to run.
   - `config` – worker config (e.g. `MaxPanicAttempts`); use `Config{}` for defaults.
-- **Returns:** `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
+- **Returns:**
+  - `Worker` – interface for metrics (`Metrics()` and `LastMetric()`); `nil` if an error occurred.
+  - `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
 
 ---
 
@@ -135,6 +139,17 @@ Returns the current status of the worker with the given name (`StatusRunning` or
 
 ---
 
+#### `Worker(name string) (Worker, error)`
+
+Returns the **Worker** interface for the given name, used to read metrics (stream or last snapshot). See [Metrics and Worker](#metrics-and-worker).
+
+- **Parameters:** `name` – the name used when the worker was registered.
+- **Returns:**
+  - `Worker` – interface with `Metrics()` and `LastMetric()`.
+  - `error` – non-nil if no worker is registered under `name` (e.g. `"worker <name> not found"`).
+
+---
+
 ## Workers (internal)
 
 Workers are not exposed by the package. The **Operator** creates and manages them by name. If a handler’s `Handle` panics, the worker recovers, logs the panic, sleeps for a short backoff, then continues the loop so the goroutine does not exit and `Stop` can complete normally.
@@ -146,6 +161,17 @@ If a handler’s `Handle` method panics, the worker recovers inside the loop. Th
 You can set a maximum number of panic recoveries by passing **Config{MaxPanicAttempts: n}** to `AddHandler`. When the count reaches that limit, the worker logs that the limit was reached, cancels its own context, and exits. Use `0` (the default) for no limit.
 
 Handle errors (when the handler returns `Fail` with a non-nil `Err`) are also logged with the standard `log` package.
+
+---
+
+## Metrics and Worker
+
+You can observe worker execution via metrics. Obtain a **Worker** from the operator with `Operator.Worker(name)`. The Worker interface provides two ways to get metrics:
+
+- **Metrics()** – returns a channel that receives metric events. The channel is created on first call (lazy) and closed when the worker stops. Receive in a dedicated goroutine to avoid blocking the worker.
+- **LastMetric()** – returns the most recent metric event and `true`, or a zero value and `false` if no event has been recorded yet. The last event is always updated, so you can poll or read on demand without using the channel.
+
+Event kinds: **handle** (after each `Handle` call: status, duration, had message, error), **panic** (when a panic is recovered: attempt count, error), **dispatch** (when `Dispatch` is used: success or failure with error), **lifecycle** (worker started or stopped). Use the `Kind` field on `MetricEvent` to determine which payload fields are set.
 
 ---
 
@@ -250,7 +276,8 @@ const (
 ctx := context.Background()
 op := smoothoperator.NewOperator(ctx)
 
-if err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{}); err != nil {
+_, err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{})
+if err != nil {
     log.Fatal(err)
 }
 if err := op.Start("my-worker"); err != nil {
@@ -269,8 +296,8 @@ if err != nil {
 
 ```go
 op := smoothoperator.NewOperator(ctx)
-op.AddHandler("a", handlerA, smoothoperator.Config{})
-op.AddHandler("b", handlerB, smoothoperator.Config{})
+_, _ = op.AddHandler("a", handlerA, smoothoperator.Config{})
+_, _ = op.AddHandler("b", handlerB, smoothoperator.Config{})
 op.StartAll()
 // ...
 <-op.StopAll()
