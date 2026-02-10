@@ -53,8 +53,8 @@ type Dispatcher interface {
 type Operator interface {
 	Dispatcher
 	// AddHandler registers a handler under the given name with the given config.
-	// Returns an error if name is already registered.
-	AddHandler(name string, handler Handler, config Config) error
+	// Returns the Worker interface for metrics and an error if name is already registered.
+	AddHandler(name string, handler Handler, config Config) (Worker, error)
 	// Start starts the worker with the given name. Returns error if name not found.
 	Start(name string) error
 	// StartAll starts every registered worker. Returns on first error if any.
@@ -91,19 +91,20 @@ func NewOperator(ctx context.Context) Operator {
 	}
 }
 
-func (op *operator) AddHandler(name string, handler Handler, config Config) error {
+func (op *operator) AddHandler(name string, handler Handler, config Config) (Worker, error) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
 
 	if _, ok := op.workers[name]; ok {
-		return fmt.Errorf("worker %s already exists", name)
+		return nil, fmt.Errorf("worker %s already exists", name)
 	}
 
-	op.workers[name] = newWorker(name, handler, config)
+	w := newWorker(name, handler, config)
+	op.workers[name] = w
 	if aware, ok := handler.(DispatcherAware); ok {
 		aware.SetDispatcher(op)
 	}
-	return nil
+	return &w.metrics, nil
 }
 
 func (op *operator) RemoveHandler(name string) error {

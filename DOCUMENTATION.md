@@ -40,7 +40,7 @@ The **Operator** manages a set of named workers. You register handlers, then sta
 
 ```go
 type Operator interface {
-    AddHandler(name string, handler Handler, config Config) error
+    AddHandler(name string, handler Handler, config Config) (Worker, error)
     Start(name string) error
     StartAll() error
     Stop(name string) (chan struct{}, error)
@@ -74,15 +74,17 @@ Creates an Operator that uses `ctx` for worker lifecycle. Workers started via th
 
 ### Methods
 
-#### `AddHandler(name string, handler Handler, config Config) error`
+#### `AddHandler(name string, handler Handler, config Config) (Worker, error)`
 
-Registers a handler under the given name with the given config. The worker is not started; call `Start` or `StartAll` to run it. Workers are not exposed; use `Status(name)` to query state.
+Registers a handler under the given name with the given config. The worker is not started; call `Start` or `StartAll` to run it. Returns the **Worker** interface for metrics access (see [Metrics and Worker](#metrics-and-worker)).
 
 - **Parameters:**
   - `name` – unique identifier for this worker.
   - `handler` – implementation of `Handler` to run.
   - `config` – worker config (e.g. `MaxPanicAttempts`); use `Config{}` for defaults.
-- **Returns:** `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
+- **Returns:**
+  - `Worker` – interface for metrics (`Metrics()` and `LastMetric()`); `nil` if an error occurred.
+  - `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
 
 ---
 
@@ -274,7 +276,8 @@ const (
 ctx := context.Background()
 op := smoothoperator.NewOperator(ctx)
 
-if err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{}); err != nil {
+_, err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{})
+if err != nil {
     log.Fatal(err)
 }
 if err := op.Start("my-worker"); err != nil {
@@ -293,8 +296,8 @@ if err != nil {
 
 ```go
 op := smoothoperator.NewOperator(ctx)
-op.AddHandler("a", handlerA, smoothoperator.Config{})
-op.AddHandler("b", handlerB, smoothoperator.Config{})
+_, _ = op.AddHandler("a", handlerA, smoothoperator.Config{})
+_, _ = op.AddHandler("b", handlerB, smoothoperator.Config{})
 op.StartAll()
 // ...
 <-op.StopAll()
