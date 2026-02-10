@@ -22,6 +22,19 @@ const (
 	StatusStopped Status = "stopped"
 )
 
+// Worker is the metrics view of a worker. Obtain it from Operator.AddHandler or
+// Operator.Worker(name). Metrics are only collected after Metrics() or LastMetric()
+// is used; the channel is created lazily on first Metrics() call.
+type Worker interface {
+	// Metrics returns a channel that receives metric events for this worker.
+	// The channel is created on first call and closed when the worker stops.
+	// Receive in a dedicated goroutine to avoid blocking the worker.
+	Metrics() <-chan MetricEvent
+	// LastMetric returns the most recent metric event and true, or a zero value and false
+	// if no event has been recorded yet.
+	LastMetric() (MetricEvent, bool)
+}
+
 // worker wraps a Handler and manages its state, status, and lifecycle. It runs
 // the handler in a loop in a goroutine until stopped. The Operator registers
 // handlers and starts/stops workers by name; the worker type is not exposed.
