@@ -168,7 +168,7 @@ Handle errors (when the handler returns `Fail` with a non-nil `Err`) are also lo
 
 You can observe worker execution via metrics. Obtain a **Worker** from the operator with `Operator.Worker(name)`. The Worker interface provides two ways to get metrics:
 
-- **Metrics()** – returns a channel that receives metric events. The channel is created on first call (lazy) and closed when the worker stops. Receive in a dedicated goroutine to avoid blocking the worker.
+- **Metrics(bufferSize int)** – returns a channel that receives metric events. The channel is created on first call (lazy) with the given buffer size and closed when the worker stops. Receive in a dedicated goroutine to avoid blocking the worker. Use `0` for an unbuffered channel.
 - **LastMetric()** – returns the most recent metric event and `true`, or a zero value and `false` if no event has been recorded yet. The last event is always updated, so you can poll or read on demand without using the channel.
 
 Event kinds: **handle** (after each `Handle` call: status, duration, had message, error), **panic** (when a panic is recovered: attempt count, error), **dispatch** (when `Dispatch` is used: success or failure with error), **lifecycle** (worker started or stopped). Use the `Kind` field on `MetricEvent` to determine which payload fields are set.

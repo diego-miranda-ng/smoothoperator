@@ -862,7 +862,7 @@ func TestWorker_Metrics_WhenReceiving_ShouldReceiveEventsThenClose(t *testing.T)
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
-	ch := w.Metrics()
+	ch := w.Metrics(10)
 	var got []smoothoperator.MetricEvent
 	done := make(chan struct{})
 	go func() {
@@ -907,7 +907,7 @@ func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
 	_, err := op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{})
 	require.NoError(t, err)
 	w, _ := op.Worker("w")
-	ch := w.Metrics()
+	ch := w.Metrics(10)
 	var got []smoothoperator.MetricEvent
 	done := make(chan struct{})
 	go func() {

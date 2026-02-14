@@ -87,12 +87,14 @@ func (m *metricsRecorder) CloseChannel() {
 }
 
 // Metrics returns a channel that receives metric events. The channel is created
-// on first call and closed when the worker stops. Implements Worker interface.
-func (m *metricsRecorder) Metrics() <-chan MetricEvent {
+// on first call with the given bufferSize and closed when the worker stops.
+// Implements Worker interface. bufferSize is the capacity of the channel buffer;
+// use 0 for an unbuffered channel.
+func (m *metricsRecorder) Metrics(bufferSize int) <-chan MetricEvent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.ch == nil {
-		m.ch = make(chan MetricEvent)
+		m.ch = make(chan MetricEvent, bufferSize)
 	}
 	return m.ch
 }
