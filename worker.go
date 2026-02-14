@@ -27,9 +27,10 @@ const (
 // is used; the channel is created lazily on first Metrics() call.
 type Worker interface {
 	// Metrics returns a channel that receives metric events for this worker.
-	// The channel is created on first call and closed when the worker stops.
+	// The channel is created on first call with the given bufferSize and closed when the worker stops.
 	// Receive in a dedicated goroutine to avoid blocking the worker.
-	Metrics() <-chan MetricEvent
+	// bufferSize is the capacity of the channel buffer; use 0 for an unbuffered channel.
+	Metrics(bufferSize int) <-chan MetricEvent
 	// LastMetric returns the most recent metric event and true, or a zero value and false
 	// if no event has been recorded yet.
 	LastMetric() (MetricEvent, bool)
