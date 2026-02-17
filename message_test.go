@@ -56,7 +56,6 @@ func TestSendMessage_WhenWorkerNotFound_ReturnsError(t *testing.T) {
 	require.ErrorIs(t, err, smoothoperator.ErrWorkerNotFound)
 	require.Nil(t, delivered)
 	require.Nil(t, resultCh)
-	require.ErrorIs(t, err, smoothoperator.ErrWorkerNotFound)
 }
 
 func TestSendMessageWithContext_WhenWorkerExists_DeliversMessage(t *testing.T) {

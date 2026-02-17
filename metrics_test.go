@@ -109,7 +109,6 @@ func TestMetricsRecorder_Metrics_WithZeroBufferSize_CreatesChannel(t *testing.T)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
 	ch := w.Metrics(0)
-	// Consume in background so worker is not blocked when sending metrics
 	go func() {
 		for range ch {
 		}
