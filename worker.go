@@ -51,7 +51,7 @@ type worker struct {
 }
 
 // newWorker creates a worker that runs the given handler under the given name
-// with the given config. The worker starts in StatusStopped; call Start to run it.
+// with the given config. The worker starts in StatusStopped; call start to run it.
 // logger is the worker's logger (typically a child of the operator's logger with "worker" set).
 func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *worker {
 	return &worker{
@@ -66,10 +66,10 @@ func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *w
 	}
 }
 
-// Start starts the worker loop in a new goroutine. The loop runs until ctx is
-// cancelled (e.g. by calling Stop). Idempotent: if the worker is already
-// running, Start returns nil without starting a second loop.
-func (w *worker) Start(ctx context.Context) error {
+// start starts the worker loop in a new goroutine. The loop runs until ctx is
+// cancelled (e.g. by calling stop). Idempotent: if the worker is already
+// running, start returns nil without starting a second loop.
+func (w *worker) start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.status == StatusRunning {
 		w.mu.Unlock()
@@ -100,10 +100,10 @@ func (w *worker) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop cancels the worker's context and returns a channel that closes when
+// stop cancels the worker's context and returns a channel that closes when
 // the worker goroutine has fully exited. If the worker was never started,
 // returns an already-closed channel immediately.
-func (w *worker) Stop() chan struct{} {
+func (w *worker) stop() chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -284,4 +284,25 @@ func (w *worker) getMaxDispatchTimeout() time.Duration {
 // getPanicBackoff returns the panic backoff duration (always set by applyHandlerOptions).
 func (w *worker) getPanicBackoff() time.Duration {
 	return w.config.panicBackoff
+}
+
+// asWorker returns the Worker interface for this worker (metrics view). Used by the operator
+// to expose the worker for AddHandler and Worker(name) without touching worker fields.
+func (w *worker) asWorker() Worker {
+	return &w.metrics
+}
+
+// sendEnvelope sends env to the worker's message channel and records the dispatch
+// outcome in metrics. It returns true if the send completed, or false if ctx was
+// done first (e.g. timeout or cancel). Used by the operator for Dispatch so it
+// does not access msgCh or metrics directly.
+func (w *worker) sendEnvelope(ctx context.Context, env envelope) bool {
+	select {
+	case w.msgCh <- env:
+		w.metrics.Record(w.metrics.dispatchEvent(true, nil))
+		return true
+	case <-ctx.Done():
+		w.metrics.Record(w.metrics.dispatchEvent(false, ctx.Err()))
+		return false
+	}
 }

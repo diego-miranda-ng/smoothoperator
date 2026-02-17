@@ -64,16 +64,16 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	w := newWorker("w", quickHandler{"w"}, applyHandlerOptions(), slog.Default().With("worker", "w"))
-	require.NoError(t, w.Start(ctx))
-	require.NoError(t, w.Start(ctx))
-	<-w.Stop()
+	require.NoError(t, w.start(ctx))
+	require.NoError(t, w.start(ctx))
+	<-w.stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
 func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testing.T) {
 	t.Parallel()
 	w := newWorker("w", quickHandler{"w"}, applyHandlerOptions(), slog.Default().With("worker", "w"))
-	ch := w.Stop()
+	ch := w.stop()
 	require.NotNil(t, ch)
 	_, open := <-ch
 	require.False(t, open)
@@ -90,9 +90,9 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 	t.Parallel()
 	w := newWorker("idle", idleHandler{15 * time.Millisecond}, applyHandlerOptions(), slog.Default().With("worker", "idle"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
-	<-w.Stop()
+	<-w.stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -100,9 +100,9 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 	t.Parallel()
 	w := newWorker("idle", idleHandler{5 * time.Second}, applyHandlerOptions(), slog.Default().With("worker", "idle"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
-	<-w.Stop()
+	<-w.stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -110,9 +110,9 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 	t.Parallel()
 	w := newWorker("idle", noneZeroHandler{}, applyHandlerOptions(), slog.Default().With("worker", "idle"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(30 * time.Millisecond)
-	<-w.Stop()
+	<-w.stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -121,9 +121,9 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	err := fmt.Errorf("handler failed")
 	w := newWorker("fail", failHandler{err: err, idle: 15 * time.Millisecond}, applyHandlerOptions(), slog.Default().With("worker", "fail"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
-	<-w.Stop()
+	<-w.stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -132,9 +132,9 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 	w := newWorker("panic-worker", panicHandler{}, applyHandlerOptions(), slog.Default().With("worker", "panic-worker"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(100 * time.Millisecond)
-	stopChan := w.Stop()
+	stopChan := w.stop()
 	select {
 	case <-stopChan:
 	case <-time.After(5 * time.Second):
@@ -147,7 +147,7 @@ func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	t.Parallel()
 	w := newWorker("panic-worker", panicHandler{}, applyHandlerOptions(WithMaxPanicAttempts(3)), slog.Default().With("worker", "panic-worker"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if w.getStatus() == StatusStopped {
@@ -197,12 +197,12 @@ func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
 	h := &msgRecordHandler{idle: 5 * time.Second}
 	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond) // let worker enter idle
 
-	// Send a message via the channel
+	// Send a message via the worker's method
 	env := envelope{msg: "direct-msg", delivered: make(chan struct{})}
-	w.msgCh <- env
+	require.True(t, w.sendEnvelope(ctx, env))
 
 	// Wait for delivery
 	select {
@@ -210,7 +210,7 @@ func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("message not delivered within timeout")
 	}
-	<-w.Stop()
+	<-w.stop()
 
 	msgs := h.getMessages()
 	require.Len(t, msgs, 1)
@@ -222,12 +222,12 @@ func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
 	h := &msgRecordHandler{idle: 10 * time.Second}
 	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond) // ensure worker enters idle
 
 	env := envelope{msg: "wake-msg", delivered: make(chan struct{})}
 	start := time.Now()
-	w.msgCh <- env
+	require.True(t, w.sendEnvelope(ctx, env))
 
 	select {
 	case <-env.delivered:
@@ -235,7 +235,7 @@ func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
 		t.Fatal("message not delivered; worker may not have woken from idle")
 	}
 	elapsed := time.Since(start)
-	<-w.Stop()
+	<-w.stop()
 
 	require.Less(t, elapsed, 2*time.Second, "worker should wake from idle immediately on message")
 	msgs := h.getMessages()
@@ -278,10 +278,10 @@ func TestWorker_WhenNoMessage_ShouldPassNilToHandler(t *testing.T) {
 	h := &msgRecordHandler{idle: 15 * time.Millisecond}
 	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
 	ctx := context.Background()
-	require.NoError(t, w.Start(ctx))
+	require.NoError(t, w.start(ctx))
 	// Let the worker loop several times without any messages
 	time.Sleep(80 * time.Millisecond)
-	<-w.Stop()
+	<-w.stop()
 
 	// Handler should never have recorded a message (all calls had msg == nil)
 	require.Empty(t, h.getMessages())
