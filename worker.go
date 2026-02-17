@@ -12,6 +12,60 @@ import (
 // before calling Handle again.
 const defaultPanicBackoff = time.Second
 
+// config holds optional settings for a worker. It is configured via HandlerOption
+// when registering a handler with AddHandler.
+type config struct {
+	maxPanicAttempts  int
+	panicBackoff      time.Duration
+	messageBufferSize int
+	maxDispatchTimeout time.Duration
+	messageOnly       bool
+}
+
+// HandlerOption configures a worker at registration time. Use WithMaxPanicAttempts,
+// WithPanicBackoff, WithMessageBufferSize, WithMaxDispatchTimeout, and WithMessageOnly
+// to set optional behavior; zero value applies defaults.
+type HandlerOption func(*config)
+
+// WithMaxPanicAttempts sets the maximum number of panic recoveries before the worker
+// stops itself. Use 0 for no limit (default).
+func WithMaxPanicAttempts(n int) HandlerOption {
+	return func(c *config) { c.maxPanicAttempts = n }
+}
+
+// WithPanicBackoff sets the duration the worker sleeps after recovering a panic
+// before calling Handle again. Use 0 for the default (1 second).
+func WithPanicBackoff(d time.Duration) HandlerOption {
+	return func(c *config) { c.panicBackoff = d }
+}
+
+// WithMessageBufferSize sets the capacity of the worker's incoming message channel.
+// Use 0 or 1 for buffer size 1 (default). Larger values allow more messages to queue.
+func WithMessageBufferSize(n int) HandlerOption {
+	return func(c *config) { c.messageBufferSize = n }
+}
+
+// WithMaxDispatchTimeout sets an optional maximum time to wait when sending a message
+// to this worker. Use 0 for no timeout (default).
+func WithMaxDispatchTimeout(d time.Duration) HandlerOption {
+	return func(c *config) { c.maxDispatchTimeout = d }
+}
+
+// WithMessageOnly, when true, makes the worker run only when a message is received.
+// When false (default), the worker runs in a loop and Handle is called even with no message.
+func WithMessageOnly(b bool) HandlerOption {
+	return func(c *config) { c.messageOnly = b }
+}
+
+// applyHandlerOptions applies the given options to a zero config and returns it.
+func applyHandlerOptions(opts ...HandlerOption) config {
+	var c config
+	for _, opt := range opts {
+		opt(&c)
+	}
+	return c
+}
+
 // Status represents the current lifecycle state of a Worker.
 type Status string
 
@@ -42,7 +96,7 @@ type Worker interface {
 type worker struct {
 	name       string
 	handler    Handler
-	config     Config
+	config     config
 	status     Status
 	mu         sync.Mutex
 	cancel     context.CancelFunc
@@ -57,15 +111,15 @@ type worker struct {
 // newWorker creates a worker that runs the given handler under the given name
 // with the given config. The worker starts in StatusStopped; call Start to run it.
 // logger is the worker's logger (typically a child of the operator's logger with "worker" set).
-func newWorker(name string, handler Handler, config Config, logger *slog.Logger) *worker {
-	bufSize := config.MessageBufferSize
+func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *worker {
+	bufSize := cfg.messageBufferSize
 	if bufSize <= 0 {
 		bufSize = 1
 	}
 	return &worker{
 		name:    name,
 		handler: handler,
-		config:  config,
+		config:  cfg,
 		status:  StatusStopped,
 		done:    make(chan struct{}),
 		msgCh:   make(chan envelope, bufSize),
@@ -96,7 +150,7 @@ func (w *worker) Start(ctx context.Context) error {
 		defer w.setStatus(StatusStopped)
 		defer w.emitStoppedAndCloseMetrics()
 		w.metrics.Record(w.metrics.lifecycleEvent("started"))
-		if w.config.MessageOnly {
+		if w.config.messageOnly {
 			w.runMessageOnly(workerCtx)
 		} else {
 			w.runLoop(workerCtx)
@@ -235,8 +289,8 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
 	w.log.Warn("panic recovered", "attempt", w.panicCount, "error", err)
 
-	if w.config.MaxPanicAttempts > 0 && w.panicCount >= w.config.MaxPanicAttempts {
-		w.log.Error("max panic attempts reached, stopping", "attempts", w.config.MaxPanicAttempts)
+	if w.config.maxPanicAttempts > 0 && w.panicCount >= w.config.maxPanicAttempts {
+		w.log.Error("max panic attempts reached, stopping", "attempts", w.config.maxPanicAttempts)
 		w.cancel()
 		return
 	}
@@ -284,13 +338,13 @@ func (w *worker) setStatus(s Status) {
 // getMaxDispatchTimeout returns the worker's max dispatch timeout (0 means no limit).
 // Safe to call from any goroutine; the value is set at construction and never changed.
 func (w *worker) getMaxDispatchTimeout() time.Duration {
-	return w.config.MaxDispatchTimeout
+	return w.config.maxDispatchTimeout
 }
 
 // getPanicBackoff returns the effective panic backoff duration (config value or default).
 func (w *worker) getPanicBackoff() time.Duration {
-	if w.config.PanicBackoff > 0 {
-		return w.config.PanicBackoff
+	if w.config.panicBackoff > 0 {
+		return w.config.panicBackoff
 	}
 	return defaultPanicBackoff
 }

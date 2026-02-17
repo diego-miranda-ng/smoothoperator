@@ -40,7 +40,7 @@ The **Operator** manages a set of named workers. You register handlers, then sta
 
 ```go
 type Operator interface {
-    AddHandler(name string, handler Handler, config Config) (Worker, error)
+    AddHandler(name string, handler Handler, opts ...HandlerOption) (Worker, error)
     Start(name string) error
     StartAll() error
     Stop(name string) (chan struct{}, error)
@@ -50,16 +50,16 @@ type Operator interface {
 }
 ```
 
-### Config
+### Handler options
 
-```go
-type Config struct {
-    MaxPanicAttempts int           // max panic recoveries before worker stops; 0 = no limit
-    PanicBackoff     time.Duration // sleep after recovering a panic; 0 = 1s default
-}
-```
+Worker behavior is configured via **HandlerOption** values passed to `AddHandler`. Omit options for defaults.
 
-`Config` is passed to `AddHandler` to configure the worker. Use a zero value `Config{}` for defaults.
+- **`HandlerOption`** – function type that configures a worker (e.g. `WithMaxPanicAttempts`, `WithMessageOnly`).
+- **`WithMaxPanicAttempts(n int)`** – max panic recoveries before the worker stops; 0 = no limit.
+- **`WithPanicBackoff(d time.Duration)`** – sleep after recovering a panic; 0 = 1s default.
+- **`WithMessageBufferSize(n int)`** – capacity of the worker's message channel; 0 or 1 = buffer size 1.
+- **`WithMaxDispatchTimeout(d time.Duration)`** – max time to wait when sending a message to this worker; 0 = no timeout.
+- **`WithMessageOnly(b bool)`** – when true, the worker runs only when a message is received (no polling).
 
 ### Constructor
 
@@ -82,14 +82,14 @@ Creates an Operator that uses `ctx` for worker lifecycle. Workers started via th
 
 ### Methods
 
-#### `AddHandler(name string, handler Handler, config Config) (Worker, error)`
+#### `AddHandler(name string, handler Handler, opts ...HandlerOption) (Worker, error)`
 
-Registers a handler under the given name with the given config. The worker is not started; call `Start` or `StartAll` to run it. Returns the **Worker** interface for metrics access (see [Metrics and Worker](#metrics-and-worker)).
+Registers a handler under the given name. Optional **HandlerOption** values (e.g. `WithMaxPanicAttempts`, `WithMessageOnly`) configure the worker. The worker is not started; call `Start` or `StartAll` to run it. Returns the **Worker** interface for metrics access (see [Metrics and Worker](#metrics-and-worker)).
 
 - **Parameters:**
   - `name` – unique identifier for this worker.
   - `handler` – implementation of `Handler` to run.
-  - `config` – worker config (e.g. `MaxPanicAttempts`); use `Config{}` for defaults.
+  - `opts` – optional worker config (e.g. `WithMaxPanicAttempts(3)`); omit for defaults.
 - **Returns:**
   - `Worker` – interface for metrics (`Metrics()` and `LastMetric()`); `nil` if an error occurred.
   - `error` – non-nil if `name` is already registered (e.g. `"worker <name> already exists"`).
@@ -166,7 +166,7 @@ Workers are not exposed by the package. The **Operator** creates and manages the
 
 If a handler’s `Handle` method panics, the worker recovers inside the loop. The panic value is converted to an error and logged (via the standard `log` package), the panic count is incremented, then the worker sleeps for a fixed backoff (one second) before calling `Handle` again. Context cancellation is respected during this sleep, so `Stop` still causes the worker to exit promptly.
 
-You can set a maximum number of panic recoveries by passing **Config{MaxPanicAttempts: n}** to `AddHandler`. When the count reaches that limit, the worker logs that the limit was reached, cancels its own context, and exits. Use `0` (the default) for no limit.
+You can set a maximum number of panic recoveries by passing **`WithMaxPanicAttempts(n)`** to `AddHandler`. When the count reaches that limit, the worker logs that the limit was reached, cancels its own context, and exits. Use `0` (the default) for no limit.
 
 Handle errors (when the handler returns `Fail` with a non-nil `Err`) are also logged with the standard `log` package.
 
@@ -284,7 +284,7 @@ const (
 ctx := context.Background()
 op := smoothoperator.NewOperator(ctx)
 
-_, err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{})
+_, err := op.AddHandler("my-worker", myHandler)
 if err != nil {
     log.Fatal(err)
 }
@@ -304,8 +304,8 @@ if err != nil {
 
 ```go
 op := smoothoperator.NewOperator(ctx)
-_, _ = op.AddHandler("a", handlerA, smoothoperator.Config{})
-_, _ = op.AddHandler("b", handlerB, smoothoperator.Config{})
+_, _ = op.AddHandler("a", handlerA)
+_, _ = op.AddHandler("b", handlerB)
 op.StartAll()
 // ...
 <-op.StopAll()

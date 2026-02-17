@@ -7,7 +7,7 @@
 //   - Operator: register handlers by name, start/stop workers by name, query status by name.
 //   - Handler: interface with Handle(ctx) returning HandleResult (None/Done/Fail).
 //   - HandleResult constructors: None, Done, Fail for building handler responses.
-//   - Config: optional settings per worker (e.g. MaxPanicAttempts, PanicBackoff).
+//   - HandlerOption: optional settings per worker (e.g. WithMaxPanicAttempts, WithMessageOnly).
 //   - Status: worker state (StatusRunning, StatusStopped).
 //
 // Workers are not exposed; they are managed entirely by the Operator.
@@ -19,7 +19,7 @@
 //	ctx := context.Background()
 //	op := smoothoperator.NewOperator(ctx)
 //	// Or with a custom logger: op := smoothoperator.NewOperator(ctx, smoothoperator.WithLogger(myLogger))
-//	_, err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{})
+//	_, err := op.AddHandler("my-worker", myHandler)
 //	if err != nil { ... }
 //	op.Start("my-worker")
 //	// ... later ...

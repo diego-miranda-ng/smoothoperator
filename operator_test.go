@@ -20,7 +20,7 @@ func TestStopAll_WhenMultipleWorkersRunning_ShouldWaitAllWorkersToStop(t *testin
 	op := smoothoperator.NewOperator(context.Background())
 	names := []string{"worker-1", "worker-2", "worker-3", "worker-4", "worker-5"}
 	for _, name := range names {
-		_, err := op.AddHandler(name, internal.QuickHandler(name), smoothoperator.Config{})
+		_, err := op.AddHandler(name, internal.QuickHandler(name))
 		require.NoError(t, err)
 		op.Start(name)
 	}
@@ -42,7 +42,7 @@ func TestStop_WhenWorkerRunning_ShouldAwaitWorkerStop(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
+	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
 	require.NoError(t, err)
 	op.Start("worker-1")
 	time.Sleep(20 * time.Millisecond)
@@ -65,9 +65,9 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 	op := smoothoperator.NewOperator(context.Background())
 
 	// Act
-	_, err := op.AddHandler("a", internal.QuickHandler("a"), smoothoperator.Config{})
+	_, err := op.AddHandler("a", internal.QuickHandler("a"))
 	require.NoError(t, err)
-	w, err := op.AddHandler("a", internal.QuickHandler("a"), smoothoperator.Config{})
+	w, err := op.AddHandler("a", internal.QuickHandler("a"))
 	require.Error(t, err)
 	require.Nil(t, w, "worker should be nil when error occurs")
 
@@ -94,9 +94,9 @@ func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w1", internal.QuickHandler("w1"), smoothoperator.Config{})
-	require.NoError(t, err)
-	_, err = op.AddHandler("w2", internal.QuickHandler("w2"), smoothoperator.Config{})
+	_, err := op.AddHandler("w1", internal.QuickHandler("w1"))
+		require.NoError(t, err)
+	_, err = op.AddHandler("w2", internal.QuickHandler("w2"))
 	require.NoError(t, err)
 
 	// Act
@@ -128,7 +128,7 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{})
+	_, err := op.AddHandler("w", internal.QuickHandler("w"))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 
@@ -147,7 +147,7 @@ func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testi
 
 	// Arrange: add handler but never start it
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{})
+	_, err := op.AddHandler("w", internal.QuickHandler("w"))
 	require.NoError(t, err)
 
 	// Act
@@ -165,7 +165,7 @@ func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("my-name", internal.QuickHandler("x"), smoothoperator.Config{})
+	_, err := op.AddHandler("my-name", internal.QuickHandler("x"))
 	require.NoError(t, err)
 
 	// Act
@@ -182,7 +182,7 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	h := internal.IdleHandler("idle", 15*time.Millisecond)
-	_, err := op.AddHandler("idle", h, smoothoperator.Config{})
+	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
 	time.Sleep(50 * time.Millisecond)
@@ -204,7 +204,7 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 	// Arrange (long idle so worker is in time.After; Stop() cancels ctx so select gets <-ctx.Done())
 	op := smoothoperator.NewOperator(context.Background())
 	h := internal.IdleHandler("idle", 5*time.Second)
-	_, err := op.AddHandler("idle", h, smoothoperator.Config{})
+	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
 	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle sleep
@@ -226,7 +226,7 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 	// Arrange (covers handle() path where Status is None but IdleDuration is 0, no select)
 	op := smoothoperator.NewOperator(context.Background())
 	h := internal.NoneZeroHandler("idle")
-	_, err := op.AddHandler("idle", h, smoothoperator.Config{})
+	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
 	time.Sleep(30 * time.Millisecond)
@@ -249,7 +249,7 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	handlerErr := fmt.Errorf("handler failed")
 	h := internal.FailHandler("fail", handlerErr, 15*time.Millisecond)
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("fail", h, smoothoperator.Config{})
+	_, err := op.AddHandler("fail", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("fail"))
 	time.Sleep(50 * time.Millisecond)
@@ -272,7 +272,7 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	op := smoothoperator.NewOperator(ctx)
-	_, err := op.AddHandler("panic-worker", internal.PanicHandler("panic-worker"), smoothoperator.Config{})
+	_, err := op.AddHandler("panic-worker", internal.PanicHandler("panic-worker"))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("panic-worker"))
 
@@ -299,7 +299,7 @@ func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	t.Parallel()
 
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("panic-worker", internal.PanicHandler("panic-worker"), smoothoperator.Config{MaxPanicAttempts: 3})
+	_, err := op.AddHandler("panic-worker", internal.PanicHandler("panic-worker"), smoothoperator.WithMaxPanicAttempts(3))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("panic-worker"))
 
@@ -322,7 +322,7 @@ func TestRemoveHandler_WhenWorkerRunning_ShouldStopAndRemoveWorker(t *testing.T)
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
+	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("worker-1"))
 	time.Sleep(20 * time.Millisecond)
@@ -342,7 +342,7 @@ func TestRemoveHandler_WhenWorkerStopped_ShouldRemoveWorker(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
+	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
 	require.NoError(t, err)
 
 	// Act
@@ -374,12 +374,12 @@ func TestRemoveHandler_WhenWorkerRemoved_ShouldAllowReAddingSameName(t *testing.
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
+	_, err := op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
 	require.NoError(t, err)
 	require.NoError(t, op.RemoveHandler("worker-1"))
 
 	// Act: re-register with the same name
-	_, err = op.AddHandler("worker-1", internal.QuickHandler("worker-1"), smoothoperator.Config{})
+	_, err = op.AddHandler("worker-1", internal.QuickHandler("worker-1"))
 
 	// Assert
 	require.NoError(t, err)
@@ -442,7 +442,7 @@ func TestDispatch_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{})
+	_, err := op.AddHandler("w", recorder)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond) // let worker start and enter idle
@@ -472,7 +472,7 @@ func TestSendMessage_WhenWorkerRunning_ShouldDeliverTypedMessage(t *testing.T) {
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{})
+	_, err := op.AddHandler("w", recorder)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -504,7 +504,7 @@ func TestDispatch_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T)
 	// Arrange: worker with a very long idle so it's guaranteed to be sleeping
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(10 * time.Second)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{})
+	_, err := op.AddHandler("w", recorder)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle
@@ -537,7 +537,7 @@ func TestDispatch_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(50 * time.Millisecond)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{})
+	_, err := op.AddHandler("w", recorder)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -570,7 +570,7 @@ func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(50 * time.Millisecond)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{})
+	_, err := op.AddHandler("w", recorder)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -614,7 +614,7 @@ func TestDispatch_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testi
 
 	// Arrange: handler that returns DoneWithResult when it receives a message
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.ResultHandler(5*time.Second, "handler-done"), smoothoperator.Config{})
+	_, err := op.AddHandler("w", internal.ResultHandler(5*time.Second, "handler-done"))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -641,9 +641,9 @@ func TestHandler_WhenUsingDispatcher_CanSendToOtherWorker(t *testing.T) {
 	// Arrange: forwarder sends any message it receives to worker "receiver"
 	op := smoothoperator.NewOperator(context.Background())
 	receiver := internal.NewMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("receiver", receiver, smoothoperator.Config{})
+	_, err := op.AddHandler("receiver", receiver)
 	require.NoError(t, err)
-	_, err = op.AddHandler("forwarder", internal.ForwarderHandler("receiver", 5*time.Second), smoothoperator.Config{})
+	_, err = op.AddHandler("forwarder", internal.ForwarderHandler("receiver", 5*time.Second))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("receiver"))
 	require.NoError(t, op.Start("forwarder"))
@@ -667,7 +667,7 @@ func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
 
 	// Worker with buffer 1 and a handler that blocks so the buffer can fill
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.Config{MessageBufferSize: 1})
+	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.WithMessageBufferSize(1))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -694,10 +694,9 @@ func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *tes
 	t.Parallel()
 
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.Config{
-		MessageBufferSize:  1,
-		MaxDispatchTimeout: 50 * time.Millisecond,
-	})
+	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second),
+		smoothoperator.WithMessageBufferSize(1),
+		smoothoperator.WithMaxDispatchTimeout(50*time.Millisecond))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -728,7 +727,7 @@ func TestMessageOnly_WhenNoMessageSent_ShouldNeverCallHandler(t *testing.T) {
 
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true})
+	_, err := op.AddHandler("w", recorder, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 
@@ -745,7 +744,7 @@ func TestMessageOnly_WhenMessageSent_ShouldCallHandlerWithMessage(t *testing.T) 
 
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true})
+	_, err := op.AddHandler("w", recorder, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(20 * time.Millisecond)
@@ -770,7 +769,7 @@ func TestMessageOnly_WhenMultipleMessagesSent_ShouldDeliverAllInOrder(t *testing
 
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(50 * time.Millisecond)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true})
+	_, err := op.AddHandler("w", recorder, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(20 * time.Millisecond)
@@ -829,7 +828,7 @@ func TestWorker_WhenNotFound_ShouldReturnError(t *testing.T) {
 func TestWorker_LastMetric_WhenNoEvents_ShouldReturnFalse(t *testing.T) {
 	t.Parallel()
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{})
+	_, err := op.AddHandler("w", internal.QuickHandler("w"))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
@@ -840,7 +839,7 @@ func TestWorker_LastMetric_WhenNoEvents_ShouldReturnFalse(t *testing.T) {
 func TestWorker_LastMetric_WhenWorkerRuns_ShouldReturnLatestEvent(t *testing.T) {
 	t.Parallel()
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{})
+	_, err := op.AddHandler("w", internal.QuickHandler("w"))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	defer func() { <-op.StopAll() }()
@@ -859,7 +858,7 @@ func TestWorker_Metrics_WhenReceiving_ShouldReceiveEventsThenClose(t *testing.T)
 	t.Parallel()
 	op := smoothoperator.NewOperator(context.Background())
 	recorder := internal.NewMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("w", recorder, smoothoperator.Config{MessageOnly: true})
+	_, err := op.AddHandler("w", recorder, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
@@ -905,7 +904,7 @@ func TestWorker_Metrics_WhenReceiving_ShouldReceiveEventsThenClose(t *testing.T)
 func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
 	t.Parallel()
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler("w"), smoothoperator.Config{})
+	_, err := op.AddHandler("w", internal.QuickHandler("w"))
 	require.NoError(t, err)
 	w, _ := op.Worker("w")
 	ch := w.Metrics(10)
@@ -943,7 +942,7 @@ func TestNewOperator_WithLogger_ShouldSendWorkerLogsToCustomLogger(t *testing.T)
 	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
 
 	handlerErr := fmt.Errorf("handler failed")
-	_, err := op.AddHandler("fail", internal.FailHandler("fail", handlerErr, 15*time.Millisecond), smoothoperator.Config{})
+	_, err := op.AddHandler("fail", internal.FailHandler("fail", handlerErr, 15*time.Millisecond))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("fail"))
 	time.Sleep(80 * time.Millisecond) // allow worker to run and log handle error at least once

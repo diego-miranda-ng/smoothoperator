@@ -6,40 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"time"
 )
-
-// Config holds optional settings for a worker registered with AddHandler.
-type Config struct {
-	// MaxPanicAttempts is the maximum number of panic recoveries before the worker
-	// stops itself. Use 0 for no limit (default).
-	MaxPanicAttempts int
-	// PanicBackoff is the duration the worker sleeps after recovering a panic
-	// before calling Handle again. Use 0 for the default (1 second).
-	PanicBackoff time.Duration
-	// MessageBufferSize is the capacity of the worker's incoming message channel.
-	// When the buffer is full, Dispatch blocks until the worker reads a message or
-	// ctx is done. Use 0 or 1 for buffer size 1 (default). Larger values allow
-	// more messages to queue; ordering is FIFO and backpressure is applied when full.
-	MessageBufferSize int
-	// MaxDispatchTimeout is an optional maximum time to wait when sending a message
-	// to this worker. If the send would block longer (e.g. buffer full), Dispatch
-	// returns context.DeadlineExceeded. Use 0 for no timeout (default); the send
-	// is then limited only by the context passed to Dispatch.
-	MaxDispatchTimeout time.Duration
-	// MessageOnly, when true, makes the worker run only when a message is received.
-	// Handle is never called with nil; the worker blocks on the message channel
-	// until a message is dispatched. When false (default), the worker runs in a
-	// loop and Handle is called even with no message (msg == nil), as today.
-	MessageOnly bool
-}
 
 type Dispatcher interface {
 	// Dispatch sends a message to the worker with the given name. If the worker is
 	// idle, it wakes up immediately. The message is passed to Handle via the msg
 	// parameter. If the worker's message buffer is full, Dispatch blocks until
 	// there is space or ctx is done (e.g. timeout or cancel); on ctx.Done it
-	// returns ctx.Err() and does not send. When Config.MaxDispatchTimeout is set
+	// returns ctx.Err() and does not send. When WithMaxDispatchTimeout is set
 	// for the worker, the send is also bounded by that duration. Returns: a
 	// channel that closes once the handler has received the message; a channel
 	// that receives the handler's Result (HandleResult.Result) when the handler
@@ -54,9 +28,10 @@ type Dispatcher interface {
 // concurrent use.
 type Operator interface {
 	Dispatcher
-	// AddHandler registers a handler under the given name with the given config.
+	// AddHandler registers a handler under the given name. Optional HandlerOption
+	// values (e.g. WithMaxPanicAttempts, WithMessageOnly) configure the worker.
 	// Returns the Worker interface for metrics and an error if name is already registered.
-	AddHandler(name string, handler Handler, config Config) (Worker, error)
+	AddHandler(name string, handler Handler, opts ...HandlerOption) (Worker, error)
 	// Start starts the worker with the given name. Returns error if name not found.
 	Start(name string) error
 	// StartAll starts every registered worker. Returns on first error if any.
@@ -125,7 +100,7 @@ func NewOperator(ctx context.Context, opts ...Option) Operator {
 	return o
 }
 
-func (op *operator) AddHandler(name string, handler Handler, config Config) (Worker, error) {
+func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOption) (Worker, error) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
 
@@ -133,7 +108,8 @@ func (op *operator) AddHandler(name string, handler Handler, config Config) (Wor
 		return nil, op.errorHandler(fmt.Errorf("worker %s already exists", name))
 	}
 
-	w := newWorker(name, handler, config, op.log.With("worker", name))
+	cfg := applyHandlerOptions(opts...)
+	w := newWorker(name, handler, cfg, op.log.With("worker", name))
 	op.workers[name] = w
 	if aware, ok := handler.(DispatcherAware); ok {
 		aware.SetDispatcher(op)
