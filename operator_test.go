@@ -2,6 +2,7 @@ package smoothoperator_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -70,8 +71,7 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 	w, err := op.AddHandler("a", internal.QuickHandler("a"))
 	require.Error(t, err)
 	require.Nil(t, w, "worker should be nil when error occurs")
-
-	// Assert
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerAlreadyExists), "err should be ErrWorkerAlreadyExists")
 	require.Contains(t, err.Error(), "already exists")
 }
 
@@ -84,8 +84,7 @@ func TestStart_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	// Act
 	err := op.Start("missing")
 	require.Error(t, err)
-
-	// Assert
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -120,6 +119,7 @@ func TestStop_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	// Assert
 	require.Error(t, err)
 	require.Nil(t, ch)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -334,6 +334,7 @@ func TestRemoveHandler_WhenWorkerRunning_ShouldStopAndRemoveWorker(t *testing.T)
 	require.NoError(t, err)
 	_, statusErr := op.Status("worker-1")
 	require.Error(t, statusErr)
+	require.True(t, errors.Is(statusErr, smoothoperator.ErrWorkerNotFound), "statusErr should be ErrWorkerNotFound")
 	require.Contains(t, statusErr.Error(), "not found")
 }
 
@@ -352,6 +353,7 @@ func TestRemoveHandler_WhenWorkerStopped_ShouldRemoveWorker(t *testing.T) {
 	require.NoError(t, err)
 	_, statusErr := op.Status("worker-1")
 	require.Error(t, statusErr)
+	require.True(t, errors.Is(statusErr, smoothoperator.ErrWorkerNotFound), "statusErr should be ErrWorkerNotFound")
 	require.Contains(t, statusErr.Error(), "not found")
 }
 
@@ -366,6 +368,7 @@ func TestRemoveHandler_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 
 	// Assert
 	require.Error(t, err)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -399,6 +402,7 @@ func TestStatus_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 
 	// Assert
 	require.Error(t, err)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -417,6 +421,7 @@ func TestDispatch_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, delivered)
 	require.Nil(t, result)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -433,6 +438,7 @@ func TestSendMessage_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, delivered)
 	require.Nil(t, result)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 
@@ -685,7 +691,10 @@ func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
 	defer cancel()
 	_, _, err = op.Dispatch(ctx, "w", "third")
 	require.Error(t, err)
-	require.EqualError(t, err, fmt.Sprintf("dispatch timeout: %s", context.DeadlineExceeded.Error()))
+	require.True(t, errors.Is(err, smoothoperator.ErrDispatchTimeout), "err should be ErrDispatchTimeout")
+	require.True(t, errors.Is(err, context.DeadlineExceeded), "err should wrap context.DeadlineExceeded")
+	require.Contains(t, err.Error(), "dispatch timeout")
+	require.Contains(t, err.Error(), context.DeadlineExceeded.Error())
 
 	<-op.StopAll()
 }
@@ -717,7 +726,10 @@ func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *tes
 	// Third message: buffer full; send is limited by MaxDispatchTimeout (50ms), so should return deadline exceeded
 	_, _, err = op.Dispatch(context.Background(), "w", "third")
 	require.Error(t, err)
-	require.EqualError(t, err, fmt.Sprintf("dispatch timeout: %s", context.DeadlineExceeded.Error()))
+	require.True(t, errors.Is(err, smoothoperator.ErrDispatchTimeout), "err should be ErrDispatchTimeout")
+	require.True(t, errors.Is(err, context.DeadlineExceeded), "err should wrap context.DeadlineExceeded")
+	require.Contains(t, err.Error(), "dispatch timeout")
+	require.Contains(t, err.Error(), context.DeadlineExceeded.Error())
 
 	<-op.StopAll()
 }
@@ -822,6 +834,7 @@ func TestWorker_WhenNotFound_ShouldReturnError(t *testing.T) {
 	op := smoothoperator.NewOperator(context.Background())
 	_, err := op.Worker("missing")
 	require.Error(t, err)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
 }
 

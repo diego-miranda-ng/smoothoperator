@@ -15,7 +15,8 @@ This document describes all exported types and methods of the `smoothoperator` p
 4. [Metrics and Worker](#metrics-and-worker)
 5. [Handler and HandleResult](#handler-and-handleresult)
 6. [Constants and types](#constants-and-types)
-7. [Usage examples](#usage-examples)
+7. [Errors](#errors)
+8. [Usage examples](#usage-examples)
 
 ---
 
@@ -273,6 +274,40 @@ const (
 
 - **StatusRunning** – Worker goroutine is active and calling `Handle`.
 - **StatusStopped** – Worker is not running (never started or already stopped).
+
+---
+
+## Errors
+
+Operator methods return errors that can be checked with the standard library’s `errors.Is`. Use these **sentinel errors** to branch on error type:
+
+| Sentinel | When it is returned |
+|----------|----------------------|
+| **`ErrWorkerAlreadyExists`** | `AddHandler` is called with a name that is already registered. |
+| **`ErrWorkerNotFound`** | An operation (`Start`, `Stop`, `RemoveHandler`, `Status`, `Worker`, `Dispatch`) is called with a worker name that is not registered. |
+| **`ErrDispatchTimeout`** | `Dispatch` could not send the message before the context was cancelled or the worker’s max dispatch timeout was exceeded. |
+
+**Example:**
+
+```go
+_, err := op.AddHandler("worker", h)
+if errors.Is(err, smoothoperator.ErrWorkerAlreadyExists) {
+    // name already in use
+}
+
+_, err = op.Start("missing")
+if errors.Is(err, smoothoperator.ErrWorkerNotFound) {
+    // no such worker
+}
+
+_, _, err = op.Dispatch(ctx, "w", msg)
+if errors.Is(err, smoothoperator.ErrDispatchTimeout) {
+    // send timed out
+}
+if errors.Is(err, context.DeadlineExceeded) {
+    // underlying context deadline exceeded
+}
+```
 
 ---
 

@@ -2,6 +2,7 @@ package smoothoperator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -105,7 +106,7 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 	defer op.mu.Unlock()
 
 	if _, ok := op.workers[name]; ok {
-		return nil, op.errorHandler(fmt.Errorf("worker %s already exists", name))
+		return nil, op.errorHandler(fmt.Errorf("worker %s already exists: %w", name, ErrWorkerAlreadyExists))
 	}
 
 	cfg := applyHandlerOptions(opts...)
@@ -120,10 +121,10 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 
 func (op *operator) RemoveHandler(name string) error {
 	op.mu.Lock()
-	w, ok := op.workers[name]
-	if !ok {
+	w, err := op.getWorkerLocked(name)
+	if err != nil {
 		op.mu.Unlock()
-		return op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return err
 	}
 	delete(op.workers, name)
 	op.mu.Unlock()
@@ -135,12 +136,9 @@ func (op *operator) RemoveHandler(name string) error {
 }
 
 func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan struct{}, <-chan any, error) {
-	op.mu.RLock()
-	w, ok := op.workers[name]
-	op.mu.RUnlock()
-
-	if !ok {
-		return nil, nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
+	w, err := op.getWorker(name)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	sendCtx := ctx
@@ -161,46 +159,37 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 		return env.delivered, env.resultCh, nil
 	case <-sendCtx.Done():
 		w.metrics.Record(w.metrics.dispatchEvent(false, sendCtx.Err()))
-		return nil, nil, op.errorHandler(fmt.Errorf("dispatch timeout: %w", sendCtx.Err()))
+		return nil, nil, op.errorHandler(errors.Join(ErrDispatchTimeout, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())))
 	}
 }
 
 func (op *operator) Status(name string) (Status, error) {
-	op.mu.RLock()
-	defer op.mu.RUnlock()
-
-	w, ok := op.workers[name]
-	if !ok {
-		return "", op.errorHandler(fmt.Errorf("worker %s not found", name))
+	w, err := op.getWorker(name)
+	if err != nil {
+		return "", err
 	}
 	return w.getStatus(), nil
 }
 
 func (op *operator) Worker(name string) (Worker, error) {
-	op.mu.RLock()
-	defer op.mu.RUnlock()
-
-	w, ok := op.workers[name]
-	if !ok {
-		return nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
+	w, err := op.getWorker(name)
+	if err != nil {
+		return nil, err
 	}
 	return &w.metrics, nil
 }
 
 func (op *operator) Start(name string) error {
-	op.mu.RLock()
-	defer op.mu.RUnlock()
-
-	worker, ok := op.workers[name]
-	if !ok {
-		return op.errorHandler(fmt.Errorf("worker %s not found", name))
+	w, err := op.getWorker(name)
+	if err != nil {
+		return err
 	}
 
-	err := worker.Start(op.ctx)
-	if err == nil {
-		op.log.Debug("worker started", "worker", name)
+	if err := w.Start(op.ctx); err != nil {
+		return op.errorHandler(err)
 	}
-	return op.errorHandler(err)
+	op.log.Debug("worker started", "worker", name)
+	return nil
 }
 
 func (op *operator) StartAll() error {
@@ -220,15 +209,12 @@ func (op *operator) StartAll() error {
 }
 
 func (op *operator) Stop(name string) (chan struct{}, error) {
-	op.mu.RLock()
-	defer op.mu.RUnlock()
-
-	worker, ok := op.workers[name]
-	if !ok {
-		return nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
+	w, err := op.getWorker(name)
+	if err != nil {
+		return nil, err
 	}
 
-	ch := worker.Stop()
+	ch := w.Stop()
 	op.log.Debug("worker stop requested", "worker", name)
 	return ch, nil
 }
@@ -250,6 +236,26 @@ func (op *operator) StopAll() chan struct{} {
 	stopped := make(chan struct{})
 	close(stopped)
 	return stopped
+}
+
+// getWorker returns the worker with the given name, or nil and an error if not found.
+// Caller must not hold op.mu. Safe for concurrent use.
+func (op *operator) getWorker(name string) (*worker, error) {
+	op.mu.RLock()
+	w, err := op.getWorkerLocked(name)
+	op.mu.RUnlock()
+
+	return w, err
+}
+
+// getWorkerLocked returns the worker with the given name, or nil and an error if not found.
+// Caller must hold op.mu (read or write). Use when the caller already holds the lock (e.g. RemoveHandler).
+func (op *operator) getWorkerLocked(name string) (*worker, error) {
+	w, ok := op.workers[name]
+	if !ok {
+		return nil, op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
+	}
+	return w, nil
 }
 
 // errorHandler logs the error with the operator's logger and returns the same error.
