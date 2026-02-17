@@ -137,7 +137,7 @@ func (w *worker) Start(ctx context.Context) error {
 // Stop cancels the worker's context and returns a channel that closes when
 // the worker goroutine has fully exited. If the worker was never started,
 // returns an already-closed channel immediately.
-func (w *worker) Stop(ctx context.Context) chan struct{} {
+func (w *worker) Stop() chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

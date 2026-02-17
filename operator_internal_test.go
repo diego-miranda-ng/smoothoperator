@@ -65,14 +65,14 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 	w := newWorker("w", quickHandler{"w"}, Config{})
 	require.NoError(t, w.Start(ctx))
 	require.NoError(t, w.Start(ctx))
-	<-w.Stop(ctx)
+	<-w.Stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
 func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testing.T) {
 	t.Parallel()
 	w := newWorker("w", quickHandler{"w"}, Config{})
-	ch := w.Stop(context.Background())
+	ch := w.Stop()
 	require.NotNil(t, ch)
 	_, open := <-ch
 	require.False(t, open)
@@ -91,7 +91,7 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
-	<-w.Stop(ctx)
+	<-w.Stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -101,7 +101,7 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
-	<-w.Stop(ctx)
+	<-w.Stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -111,7 +111,7 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(30 * time.Millisecond)
-	<-w.Stop(ctx)
+	<-w.Stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -122,7 +122,7 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
-	<-w.Stop(ctx)
+	<-w.Stop()
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
@@ -133,7 +133,7 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 	defer cancel()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(100 * time.Millisecond)
-	stopChan := w.Stop(context.Background())
+	stopChan := w.Stop()
 	select {
 	case <-stopChan:
 	case <-time.After(5 * time.Second):
@@ -209,7 +209,7 @@ func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("message not delivered within timeout")
 	}
-	<-w.Stop(ctx)
+	<-w.Stop()
 
 	msgs := h.getMessages()
 	require.Len(t, msgs, 1)
@@ -234,7 +234,7 @@ func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
 		t.Fatal("message not delivered; worker may not have woken from idle")
 	}
 	elapsed := time.Since(start)
-	<-w.Stop(ctx)
+	<-w.Stop()
 
 	require.Less(t, elapsed, 2*time.Second, "worker should wake from idle immediately on message")
 	msgs := h.getMessages()
@@ -280,7 +280,7 @@ func TestWorker_WhenNoMessage_ShouldPassNilToHandler(t *testing.T) {
 	require.NoError(t, w.Start(ctx))
 	// Let the worker loop several times without any messages
 	time.Sleep(80 * time.Millisecond)
-	<-w.Stop(ctx)
+	<-w.Stop()
 
 	// Handler should never have recorded a message (all calls had msg == nil)
 	require.Empty(t, h.getMessages())
