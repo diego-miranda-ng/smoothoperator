@@ -130,7 +130,7 @@ func (op *operator) AddHandler(name string, handler Handler, config Config) (Wor
 	defer op.mu.Unlock()
 
 	if _, ok := op.workers[name]; ok {
-		return nil, fmt.Errorf("worker %s already exists", name)
+		return nil, op.errorHandler(fmt.Errorf("worker %s already exists", name))
 	}
 
 	w := newWorker(name, handler, config, op.log.With("worker", name))
@@ -147,7 +147,7 @@ func (op *operator) RemoveHandler(name string) error {
 	w, ok := op.workers[name]
 	if !ok {
 		op.mu.Unlock()
-		return fmt.Errorf("worker %s not found", name)
+		return op.errorHandler(fmt.Errorf("worker %s not found", name))
 	}
 	delete(op.workers, name)
 	op.mu.Unlock()
@@ -164,7 +164,7 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 	op.mu.RUnlock()
 
 	if !ok {
-		return nil, nil, fmt.Errorf("worker %s not found", name)
+		return nil, nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
 	}
 
 	sendCtx := ctx
@@ -185,7 +185,7 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 		return env.delivered, env.resultCh, nil
 	case <-sendCtx.Done():
 		w.metrics.Record(w.metrics.dispatchEvent(false, sendCtx.Err()))
-		return nil, nil, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())
+		return nil, nil, op.errorHandler(fmt.Errorf("dispatch timeout: %w", sendCtx.Err()))
 	}
 }
 
@@ -195,7 +195,7 @@ func (op *operator) Status(name string) (Status, error) {
 
 	w, ok := op.workers[name]
 	if !ok {
-		return "", fmt.Errorf("worker %s not found", name)
+		return "", op.errorHandler(fmt.Errorf("worker %s not found", name))
 	}
 	return w.getStatus(), nil
 }
@@ -206,7 +206,7 @@ func (op *operator) Worker(name string) (Worker, error) {
 
 	w, ok := op.workers[name]
 	if !ok {
-		return nil, fmt.Errorf("worker %s not found", name)
+		return nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
 	}
 	return &w.metrics, nil
 }
@@ -217,14 +217,14 @@ func (op *operator) Start(name string) error {
 
 	worker, ok := op.workers[name]
 	if !ok {
-		return fmt.Errorf("worker %s not found", name)
+		return op.errorHandler(fmt.Errorf("worker %s not found", name))
 	}
 
 	err := worker.Start(op.ctx)
 	if err == nil {
 		op.log.Debug("worker started", "worker", name)
 	}
-	return err
+	return op.errorHandler(err)
 }
 
 func (op *operator) StartAll() error {
@@ -237,7 +237,7 @@ func (op *operator) StartAll() error {
 
 	for _, name := range names {
 		if err := op.Start(name); err != nil {
-			return err
+			return op.errorHandler(err)
 		}
 	}
 	return nil
@@ -249,7 +249,7 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 
 	worker, ok := op.workers[name]
 	if !ok {
-		return nil, fmt.Errorf("worker %s not found", name)
+		return nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
 	}
 
 	ch := worker.Stop()
@@ -274,4 +274,13 @@ func (op *operator) StopAll() chan struct{} {
 	stopped := make(chan struct{})
 	close(stopped)
 	return stopped
+}
+
+// errorHandler logs the error with the operator's logger and returns the same error.
+// If err is nil, it returns nil without logging.
+func (op *operator) errorHandler(err error) error {
+	if err != nil {
+		op.log.Error("operator error", "error", err)
+	}
+	return err
 }

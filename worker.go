@@ -74,37 +74,6 @@ func newWorker(name string, handler Handler, config Config, logger *slog.Logger)
 	}
 }
 
-func (w *worker) getName() string {
-	return w.name
-}
-
-// getStatus returns the current worker status. Safe to call from any goroutine.
-func (w *worker) getStatus() Status {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.status
-}
-
-func (w *worker) setStatus(s Status) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.status = s
-}
-
-// getMaxDispatchTimeout returns the worker's max dispatch timeout (0 means no limit).
-// Safe to call from any goroutine; the value is set at construction and never changed.
-func (w *worker) getMaxDispatchTimeout() time.Duration {
-	return w.config.MaxDispatchTimeout
-}
-
-// getPanicBackoff returns the effective panic backoff duration (config value or default).
-func (w *worker) getPanicBackoff() time.Duration {
-	if w.config.PanicBackoff > 0 {
-		return w.config.PanicBackoff
-	}
-	return defaultPanicBackoff
-}
-
 // Start starts the worker loop in a new goroutine. The loop runs until ctx is
 // cancelled (e.g. by calling Stop). Idempotent: if the worker is already
 // running, Start returns nil without starting a second loop.
@@ -293,4 +262,35 @@ func panicToError(v interface{}) error {
 func (w *worker) emitStoppedAndCloseMetrics() {
 	w.metrics.Record(w.metrics.lifecycleEvent("stopped"))
 	w.metrics.CloseChannel()
+}
+
+func (w *worker) getName() string {
+	return w.name
+}
+
+// getStatus returns the current worker status. Safe to call from any goroutine.
+func (w *worker) getStatus() Status {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.status
+}
+
+func (w *worker) setStatus(s Status) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.status = s
+}
+
+// getMaxDispatchTimeout returns the worker's max dispatch timeout (0 means no limit).
+// Safe to call from any goroutine; the value is set at construction and never changed.
+func (w *worker) getMaxDispatchTimeout() time.Duration {
+	return w.config.MaxDispatchTimeout
+}
+
+// getPanicBackoff returns the effective panic backoff duration (config value or default).
+func (w *worker) getPanicBackoff() time.Duration {
+	if w.config.PanicBackoff > 0 {
+		return w.config.PanicBackoff
+	}
+	return defaultPanicBackoff
 }
