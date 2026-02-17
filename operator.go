@@ -2,6 +2,7 @@ package smoothoperator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -105,7 +106,7 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 	defer op.mu.Unlock()
 
 	if _, ok := op.workers[name]; ok {
-		return nil, op.errorHandler(fmt.Errorf("worker %s already exists", name))
+		return nil, op.errorHandler(fmt.Errorf("worker %s already exists: %w", name, ErrWorkerAlreadyExists))
 	}
 
 	cfg := applyHandlerOptions(opts...)
@@ -123,7 +124,7 @@ func (op *operator) RemoveHandler(name string) error {
 	w, ok := op.workers[name]
 	if !ok {
 		op.mu.Unlock()
-		return op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
 	}
 	delete(op.workers, name)
 	op.mu.Unlock()
@@ -140,7 +141,7 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 	op.mu.RUnlock()
 
 	if !ok {
-		return nil, nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return nil, nil, op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
 	}
 
 	sendCtx := ctx
@@ -161,7 +162,7 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 		return env.delivered, env.resultCh, nil
 	case <-sendCtx.Done():
 		w.metrics.Record(w.metrics.dispatchEvent(false, sendCtx.Err()))
-		return nil, nil, op.errorHandler(fmt.Errorf("dispatch timeout: %w", sendCtx.Err()))
+		return nil, nil, op.errorHandler(errors.Join(ErrDispatchTimeout, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())))
 	}
 }
 
@@ -171,7 +172,7 @@ func (op *operator) Status(name string) (Status, error) {
 
 	w, ok := op.workers[name]
 	if !ok {
-		return "", op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return "", op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
 	}
 	return w.getStatus(), nil
 }
@@ -182,7 +183,7 @@ func (op *operator) Worker(name string) (Worker, error) {
 
 	w, ok := op.workers[name]
 	if !ok {
-		return nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return nil, op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
 	}
 	return &w.metrics, nil
 }
@@ -193,7 +194,7 @@ func (op *operator) Start(name string) error {
 
 	worker, ok := op.workers[name]
 	if !ok {
-		return op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
 	}
 
 	err := worker.Start(op.ctx)
@@ -225,7 +226,7 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 
 	worker, ok := op.workers[name]
 	if !ok {
-		return nil, op.errorHandler(fmt.Errorf("worker %s not found", name))
+		return nil, op.errorHandler(fmt.Errorf("worker %s not found: %w", name, ErrWorkerNotFound))
 	}
 
 	ch := worker.Stop()
