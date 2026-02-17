@@ -15,7 +15,9 @@ func TestMetricsRecorder_LastMetric_WhenNoEvents_ReturnsFalse(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult {
+		return smoothoperator.Done()
+	}))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
@@ -32,7 +34,9 @@ func TestMetricsRecorder_LastMetric_WhenWorkerRan_ReturnsLatestEvent(t *testing.
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult {
+		return smoothoperator.Done()
+	}))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -56,7 +60,9 @@ func TestMetricsRecorder_Metrics_WhenChannelCreated_ReturnsChannelThatReceivesEv
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult {
+		return smoothoperator.Done()
+	}))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
@@ -96,7 +102,9 @@ func TestMetricsRecorder_Metrics_WithZeroBufferSize_CreatesChannel(t *testing.T)
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult {
+		return smoothoperator.Done()
+	}))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
