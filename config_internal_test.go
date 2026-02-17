@@ -68,7 +68,7 @@ func TestApplyHandlerOptions_WithPanicBackoff_SetsField(t *testing.T) {
 
 func TestApplyHandlerOptions_WithPanicBackoffZero_NormalizedToDefault(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(WithPanicBackoff(0))
 
@@ -156,7 +156,7 @@ func TestApplyHandlerOptions_WithMaxDispatchTimeoutZero_KeepsZero(t *testing.T) 
 
 func TestApplyHandlerOptions_WithMessageOnly_SetsField(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfgTrue := applyHandlerOptions(WithMessageOnly(true))
 	cfgFalse := applyHandlerOptions(WithMessageOnly(false))

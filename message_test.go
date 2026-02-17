@@ -12,10 +12,11 @@ import (
 
 func TestSendMessage_WhenWorkerExists_DeliversTypedMessage(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	recorder := newMessageRecorder(5 * time.Second)
-	_, err := op.AddHandler("w", recorder.Handler())
+	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
+	_, err := op.AddHandler("w", recordingHandler)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(30 * time.Millisecond)
@@ -34,7 +35,7 @@ func TestSendMessage_WhenWorkerExists_DeliversTypedMessage(t *testing.T) {
 	}
 	<-resultCh
 	<-op.StopAll()
-	msgs := recorder.Messages()
+	msgs := getMessages()
 	require.Len(t, msgs, 1)
 	m, ok := msgs[0].(smoothoperator.Message[string])
 	require.True(t, ok)
@@ -43,6 +44,7 @@ func TestSendMessage_WhenWorkerExists_DeliversTypedMessage(t *testing.T) {
 
 func TestSendMessage_WhenWorkerNotFound_ReturnsError(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 
@@ -51,13 +53,15 @@ func TestSendMessage_WhenWorkerNotFound_ReturnsError(t *testing.T) {
 
 	// Assert
 	require.Error(t, err)
+	require.ErrorIs(t, err, smoothoperator.ErrWorkerNotFound)
 	require.Nil(t, delivered)
 	require.Nil(t, resultCh)
-	require.True(t, err != nil && (err.Error() == "worker not found" || len(err.Error()) > 0))
+	require.ErrorIs(t, err, smoothoperator.ErrWorkerNotFound)
 }
 
 func TestSendMessageWithContext_WhenWorkerExists_DeliversMessage(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	_, err := op.AddHandler("w", internal.NewHandlerMock(func(ctx context.Context, msg any) smoothoperator.HandleResult {
@@ -86,9 +90,10 @@ func TestSendMessageWithContext_WhenWorkerExists_DeliversMessage(t *testing.T) {
 
 func TestSendMessageWithContext_WhenContextTimesOut_ReturnsError(t *testing.T) {
 	t.Parallel()
+
 	// Arrange: worker with small buffer and blocking handler so buffer fills and next send can timeout
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", blockingHandler(2*time.Second), smoothoperator.WithMessageBufferSize(1))
+	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.WithMessageBufferSize(1))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -103,6 +108,7 @@ func TestSendMessageWithContext_WhenContextTimesOut_ReturnsError(t *testing.T) {
 
 	// Assert
 	require.Error(t, err)
+	require.ErrorIs(t, err, smoothoperator.ErrDispatchTimeout)
 	require.Nil(t, delivered)
 	require.Nil(t, resultCh)
 	<-op.StopAll()
