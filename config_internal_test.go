@@ -10,7 +10,7 @@ import (
 
 func TestApplyHandlerOptions_NoOptions_ReturnsDefaults(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions()
 
@@ -24,36 +24,46 @@ func TestApplyHandlerOptions_NoOptions_ReturnsDefaults(t *testing.T) {
 
 func TestApplyHandlerOptions_WithMaxPanicAttempts_SetsField(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(WithMaxPanicAttempts(3))
 
-	// Assert
+	// Assert: only maxPanicAttempts is set; all others stay default
 	assert.Equal(t, 3, cfg.maxPanicAttempts)
 	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
 	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMaxPanicAttemptsZero_KeepsZero(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(WithMaxPanicAttempts(0))
 
-	// Assert
+	// Assert: only maxPanicAttempts is 0; all others stay default
 	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithPanicBackoff_SetsField(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	d := 2 * time.Second
 	// Act
 	cfg := applyHandlerOptions(WithPanicBackoff(d))
 
-	// Assert
+	// Assert: only panicBackoff is set; all others stay default
 	assert.Equal(t, d, cfg.panicBackoff)
 	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithPanicBackoffZero_NormalizedToDefault(t *testing.T) {
@@ -62,60 +72,86 @@ func TestApplyHandlerOptions_WithPanicBackoffZero_NormalizedToDefault(t *testing
 	// Act
 	cfg := applyHandlerOptions(WithPanicBackoff(0))
 
-	// Assert
+	// Assert: panicBackoff normalized to default; all others stay default
 	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMessageBufferSize_SetsField(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(WithMessageBufferSize(10))
 
-	// Assert
+	// Assert: only messageBufferSize is set; all others stay default
 	assert.Equal(t, 10, cfg.messageBufferSize)
 	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMessageBufferSizeZero_NormalizedToDefault(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(WithMessageBufferSize(0))
 
 	// Assert
 	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMessageBufferSizeNegative_NormalizedToDefault(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(WithMessageBufferSize(-1))
 
 	// Assert
 	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMaxDispatchTimeout_SetsField(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	d := 50 * time.Millisecond
+
 	// Act
 	cfg := applyHandlerOptions(WithMaxDispatchTimeout(d))
 
-	// Assert
+	// Assert: only maxDispatchTimeout is set; all others stay default
 	assert.Equal(t, d, cfg.maxDispatchTimeout)
+	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMaxDispatchTimeoutZero_KeepsZero(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	// Act
 	cfg := applyHandlerOptions(WithMaxDispatchTimeout(0))
 
-	// Assert
+	// Assert: only maxDispatchTimeout is 0; all others stay default
 	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
+	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
+	assert.Equal(t, 0, cfg.maxPanicAttempts)
+	assert.False(t, cfg.messageOnly)
 }
 
 func TestApplyHandlerOptions_WithMessageOnly_SetsField(t *testing.T) {
@@ -125,14 +161,23 @@ func TestApplyHandlerOptions_WithMessageOnly_SetsField(t *testing.T) {
 	cfgTrue := applyHandlerOptions(WithMessageOnly(true))
 	cfgFalse := applyHandlerOptions(WithMessageOnly(false))
 
-	// Assert
+	// Assert: only messageOnly is set; all others stay default
 	assert.True(t, cfgTrue.messageOnly)
+	assert.Equal(t, defaultMessageBufferSize, cfgTrue.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfgTrue.panicBackoff)
+	assert.Equal(t, 0, cfgTrue.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfgTrue.maxDispatchTimeout)
+
 	assert.False(t, cfgFalse.messageOnly)
+	assert.Equal(t, defaultMessageBufferSize, cfgFalse.messageBufferSize)
+	assert.Equal(t, defaultPanicBackoff, cfgFalse.panicBackoff)
+	assert.Equal(t, 0, cfgFalse.maxPanicAttempts)
+	assert.Equal(t, time.Duration(0), cfgFalse.maxDispatchTimeout)
 }
 
 func TestApplyHandlerOptions_MultipleOptions_AllApplied(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(
 		WithMaxPanicAttempts(5),
@@ -152,7 +197,7 @@ func TestApplyHandlerOptions_MultipleOptions_AllApplied(t *testing.T) {
 
 func TestApplyHandlerOptions_LastOptionWins_WhenSameFieldSetTwice(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(
 		WithMaxPanicAttempts(2),
@@ -170,7 +215,7 @@ func TestApplyHandlerOptions_LastOptionWins_WhenSameFieldSetTwice(t *testing.T) 
 
 func TestApplyHandlerOptions_ZeroValuesNormalized_WhenMixedWithOtherOptions(t *testing.T) {
 	t.Parallel()
-	// Arrange
+
 	// Act
 	cfg := applyHandlerOptions(
 		WithMaxPanicAttempts(1),
@@ -184,13 +229,4 @@ func TestApplyHandlerOptions_ZeroValuesNormalized_WhenMixedWithOtherOptions(t *t
 	assert.Equal(t, defaultMessageBufferSize, cfg.messageBufferSize)
 	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
 	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
-}
-
-func TestDefaultConstants_Values(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	// Act
-	// Assert
-	assert.Equal(t, 1, defaultMessageBufferSize)
-	assert.Equal(t, time.Second, defaultPanicBackoff)
 }
