@@ -116,7 +116,7 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 		aware.SetDispatcher(op)
 	}
 	op.log.Info("handler added", "worker", name)
-	return &w.metrics, nil
+	return w.asWorker(), nil
 }
 
 func (op *operator) RemoveHandler(name string) error {
@@ -131,7 +131,7 @@ func (op *operator) RemoveHandler(name string) error {
 
 	op.log.Info("handler removed", "worker", name)
 	// Stop the worker (if running) and wait for it to finish.
-	<-w.Stop()
+	<-w.stop()
 	return nil
 }
 
@@ -153,14 +153,10 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 		delivered: make(chan struct{}),
 		resultCh:  make(chan any, 1),
 	}
-	select {
-	case w.msgCh <- env:
-		w.metrics.Record(w.metrics.dispatchEvent(true, nil))
+	if w.sendEnvelope(sendCtx, env) {
 		return env.delivered, env.resultCh, nil
-	case <-sendCtx.Done():
-		w.metrics.Record(w.metrics.dispatchEvent(false, sendCtx.Err()))
-		return nil, nil, op.errorHandler(errors.Join(ErrDispatchTimeout, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())))
 	}
+	return nil, nil, op.errorHandler(errors.Join(ErrDispatchTimeout, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())))
 }
 
 func (op *operator) Status(name string) (Status, error) {
@@ -176,7 +172,7 @@ func (op *operator) Worker(name string) (Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &w.metrics, nil
+	return w.asWorker(), nil
 }
 
 func (op *operator) Start(name string) error {
@@ -185,7 +181,7 @@ func (op *operator) Start(name string) error {
 		return err
 	}
 
-	if err := w.Start(op.ctx); err != nil {
+	if err := w.start(op.ctx); err != nil {
 		return op.errorHandler(err)
 	}
 	op.log.Debug("worker started", "worker", name)
@@ -214,7 +210,7 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 		return nil, err
 	}
 
-	ch := w.Stop()
+	ch := w.stop()
 	op.log.Debug("worker stop requested", "worker", name)
 	return ch, nil
 }
