@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// defaultPanicBackoff is the duration the worker sleeps after recovering a panic
-// before calling Handle again.
-const defaultPanicBackoff = time.Second
-
 // Status represents the current lifecycle state of a Worker.
 type Status string
 
@@ -42,7 +38,7 @@ type Worker interface {
 type worker struct {
 	name       string
 	handler    Handler
-	config     Config
+	config     config
 	status     Status
 	mu         sync.Mutex
 	cancel     context.CancelFunc
@@ -57,18 +53,14 @@ type worker struct {
 // newWorker creates a worker that runs the given handler under the given name
 // with the given config. The worker starts in StatusStopped; call Start to run it.
 // logger is the worker's logger (typically a child of the operator's logger with "worker" set).
-func newWorker(name string, handler Handler, config Config, logger *slog.Logger) *worker {
-	bufSize := config.MessageBufferSize
-	if bufSize <= 0 {
-		bufSize = 1
-	}
+func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *worker {
 	return &worker{
 		name:    name,
 		handler: handler,
-		config:  config,
+		config:  cfg,
 		status:  StatusStopped,
 		done:    make(chan struct{}),
-		msgCh:   make(chan envelope, bufSize),
+		msgCh:   make(chan envelope, cfg.messageBufferSize),
 		log:     logger,
 		metrics: newMetricsRecorder(name),
 	}
@@ -95,8 +87,10 @@ func (w *worker) Start(ctx context.Context) error {
 		defer close(w.done)
 		defer w.setStatus(StatusStopped)
 		defer w.emitStoppedAndCloseMetrics()
+
 		w.metrics.Record(w.metrics.lifecycleEvent("started"))
-		if w.config.MessageOnly {
+
+		if w.config.messageOnly {
 			w.runMessageOnly(workerCtx)
 		} else {
 			w.runLoop(workerCtx)
@@ -235,8 +229,8 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
 	w.log.Warn("panic recovered", "attempt", w.panicCount, "error", err)
 
-	if w.config.MaxPanicAttempts > 0 && w.panicCount >= w.config.MaxPanicAttempts {
-		w.log.Error("max panic attempts reached, stopping", "attempts", w.config.MaxPanicAttempts)
+	if w.config.maxPanicAttempts > 0 && w.panicCount >= w.config.maxPanicAttempts {
+		w.log.Error("max panic attempts reached, stopping", "attempts", w.config.maxPanicAttempts)
 		w.cancel()
 		return
 	}
@@ -284,13 +278,10 @@ func (w *worker) setStatus(s Status) {
 // getMaxDispatchTimeout returns the worker's max dispatch timeout (0 means no limit).
 // Safe to call from any goroutine; the value is set at construction and never changed.
 func (w *worker) getMaxDispatchTimeout() time.Duration {
-	return w.config.MaxDispatchTimeout
+	return w.config.maxDispatchTimeout
 }
 
-// getPanicBackoff returns the effective panic backoff duration (config value or default).
+// getPanicBackoff returns the panic backoff duration (always set by applyHandlerOptions).
 func (w *worker) getPanicBackoff() time.Duration {
-	if w.config.PanicBackoff > 0 {
-		return w.config.PanicBackoff
-	}
-	return defaultPanicBackoff
+	return w.config.panicBackoff
 }

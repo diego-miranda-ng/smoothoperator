@@ -54,6 +54,7 @@ type metricsRecorder struct {
 	last       *MetricEvent
 }
 
+// newMetricsRecorder creates a recorder bound to the given worker name.
 func newMetricsRecorder(workerName string) metricsRecorder {
 	return metricsRecorder{workerName: workerName}
 }
