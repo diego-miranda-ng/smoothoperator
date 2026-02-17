@@ -25,6 +25,7 @@ func main() {
     defer cancel()
 
     op := smoothoperator.NewOperator(ctx)
+    // Optional: op := smoothoperator.NewOperator(ctx, smoothoperator.WithLogger(myLogger))
 
     _, _ = op.AddHandler("my-worker", myHandler{}, smoothoperator.Config{})
     op.StartAll()
@@ -43,7 +44,7 @@ func (myHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
 ```
 
 - **`Handler`** implements `Handle(ctx) HandleResult`. Return `Done()`, `None(idleDuration)`, or `Fail(err, idleDuration)`.
-- **`NewOperator(ctx)`** creates an operator. Use `AddHandler(name, handler, config)` (returns `Worker, error`), then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown. Use `Status(name)` to get a worker’s status. Pass `Config{}` for defaults, or set `Config{MaxPanicAttempts: n}` to stop a worker after n panic recoveries.
+- **`NewOperator(ctx)`** or **`NewOperator(ctx, smoothoperator.WithLogger(logger))`** creates an operator. Without options, a default JSON logger writing to `os.Stdout` is used; with `WithLogger` you can plug your own logger (logs form a tree: operator → each worker with a `"worker"` attribute). Use `AddHandler(name, handler, config)` (returns `Worker, error`), then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown. Use `Status(name)` to get a worker’s status. Pass `Config{}` for defaults, or set `Config{MaxPanicAttempts: n}` to stop a worker after n panic recoveries.
 
 ## Documentation
 

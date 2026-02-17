@@ -3,6 +3,8 @@ package smoothoperator
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -75,20 +77,52 @@ type Operator interface {
 	Worker(name string) (Worker, error)
 }
 
+// defaultLogger is the logger used when no WithLogger option is provided. It
+// writes JSON to os.Stdout.
+var defaultLogger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+// Option configures an Operator at creation time. Use WithLogger to supply a
+// custom logger; otherwise a default JSON logger writing to os.Stdout is used.
+// Logs from the operator and its workers form a tree: operator logs use the
+// given logger, and each worker uses a child logger with a "worker" attribute
+// set to the worker name.
+type Option func(*operator)
+
+// WithLogger sets the logger used by the operator and all its workers. Each
+// worker gets a child logger with "worker" set to the worker name. If logger is
+// nil, the default JSON logger (writing to os.Stdout) is used.
+func WithLogger(logger *slog.Logger) Option {
+	return func(o *operator) {
+		if logger != nil {
+			o.log = logger
+		}
+	}
+}
+
 type operator struct {
 	ctx     context.Context
+	log     *slog.Logger
 	workers map[string]*worker
 	mu      sync.RWMutex
 }
 
 // NewOperator creates an Operator that will use ctx for worker lifecycle. Workers
 // started via this operator run until ctx is cancelled or Stop/StopAll is called.
-func NewOperator(ctx context.Context) Operator {
-	return &operator{
+// Optional options (e.g. WithLogger) configure the operator; if no logger is
+// provided, a default JSON logger writing to os.Stdout is used.
+func NewOperator(ctx context.Context, opts ...Option) Operator {
+	o := &operator{
 		ctx:     ctx,
+		log:     defaultLogger,
 		workers: make(map[string]*worker),
 		mu:      sync.RWMutex{},
 	}
+
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	return o
 }
 
 func (op *operator) AddHandler(name string, handler Handler, config Config) (Worker, error) {
@@ -99,11 +133,12 @@ func (op *operator) AddHandler(name string, handler Handler, config Config) (Wor
 		return nil, fmt.Errorf("worker %s already exists", name)
 	}
 
-	w := newWorker(name, handler, config)
+	w := newWorker(name, handler, config, op.log.With("worker", name))
 	op.workers[name] = w
 	if aware, ok := handler.(DispatcherAware); ok {
 		aware.SetDispatcher(op)
 	}
+	op.log.Info("handler added", "worker", name)
 	return &w.metrics, nil
 }
 
@@ -117,6 +152,7 @@ func (op *operator) RemoveHandler(name string) error {
 	delete(op.workers, name)
 	op.mu.Unlock()
 
+	op.log.Info("handler removed", "worker", name)
 	// Stop the worker (if running) and wait for it to finish.
 	<-w.Stop()
 	return nil
@@ -184,7 +220,11 @@ func (op *operator) Start(name string) error {
 		return fmt.Errorf("worker %s not found", name)
 	}
 
-	return worker.Start(op.ctx)
+	err := worker.Start(op.ctx)
+	if err == nil {
+		op.log.Debug("worker started", "worker", name)
+	}
+	return err
 }
 
 func (op *operator) StartAll() error {
@@ -212,7 +252,9 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 		return nil, fmt.Errorf("worker %s not found", name)
 	}
 
-	return worker.Stop(), nil
+	ch := worker.Stop()
+	op.log.Debug("worker stop requested", "worker", name)
+	return ch, nil
 }
 
 func (op *operator) StopAll() chan struct{} {

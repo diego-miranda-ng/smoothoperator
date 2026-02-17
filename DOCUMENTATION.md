@@ -63,12 +63,20 @@ type Config struct {
 
 ### Constructor
 
-#### `NewOperator(ctx context.Context) Operator`
+#### `NewOperator(ctx context.Context, opts ...Option) Operator`
 
 Creates an Operator that uses `ctx` for worker lifecycle. Workers started via this operator run until `ctx` is cancelled or `Stop` / `StopAll` is called.
 
-- **Parameters:** `ctx` – context used for all workers started by this operator.
+- **Parameters:**
+  - `ctx` – context used for all workers started by this operator.
+  - `opts` – optional configuration (e.g. `WithLogger` to supply a custom logger).
 - **Returns:** An `Operator` implementation (concrete type is unexported).
+
+**Logging:** The operator and its workers use structured logging via `log/slog`. By default, a JSON handler writing to `os.Stdout` is used. Pass `WithLogger(logger)` to use your own logger. Logs form a tree: the operator logs with the given logger, and each worker gets a child logger with a `"worker"` attribute set to the worker name, so all worker log lines are automatically attributed. If you pass `WithLogger(nil)`, the default JSON logger is used.
+
+#### `Option` and `WithLogger(logger *slog.Logger) Option`
+
+`Option` is a function type used to configure an operator at creation. `WithLogger` sets the logger for the operator and all its workers; each worker uses a child logger with the `"worker"` attribute set to its name.
 
 ---
 

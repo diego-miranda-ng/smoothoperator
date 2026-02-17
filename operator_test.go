@@ -3,6 +3,7 @@ package smoothoperator_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -932,4 +933,32 @@ func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
 		}
 	}
 	require.True(t, hasDispatchOk, "expected at least one successful dispatch event in stream")
+}
+
+func TestNewOperator_WithLogger_ShouldSendWorkerLogsToCustomLogger(t *testing.T) {
+	t.Parallel()
+
+	capture := &captureHandler{}
+	logger := slog.New(capture)
+	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
+
+	handlerErr := fmt.Errorf("handler failed")
+	_, err := op.AddHandler("fail", internal.FailHandler("fail", handlerErr, 15*time.Millisecond), smoothoperator.Config{})
+	require.NoError(t, err)
+	require.NoError(t, op.Start("fail"))
+	time.Sleep(80 * time.Millisecond) // allow worker to run and log handle error at least once
+
+	ch, err := op.Stop("fail")
+	require.NoError(t, err)
+	<-ch
+
+	msgs := capture.messages()
+	var found bool
+	for _, m := range msgs {
+		if m == "handle error" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected custom logger to receive worker log 'handle error', got: %v", msgs)
 }
