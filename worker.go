@@ -3,7 +3,7 @@ package smoothoperator
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -49,13 +49,15 @@ type worker struct {
 	done       chan struct{}
 	panicCount int
 	msgCh      chan envelope // buffered channel for incoming messages
+	log        *slog.Logger
 
 	metrics metricsRecorder
 }
 
 // newWorker creates a worker that runs the given handler under the given name
 // with the given config. The worker starts in StatusStopped; call Start to run it.
-func newWorker(name string, handler Handler, config Config) *worker {
+// logger is the worker's logger (typically a child of the operator's logger with "worker" set).
+func newWorker(name string, handler Handler, config Config, logger *slog.Logger) *worker {
 	bufSize := config.MessageBufferSize
 	if bufSize <= 0 {
 		bufSize = 1
@@ -67,6 +69,7 @@ func newWorker(name string, handler Handler, config Config) *worker {
 		status:  StatusStopped,
 		done:    make(chan struct{}),
 		msgCh:   make(chan envelope, bufSize),
+		log:     logger,
 		metrics: newMetricsRecorder(name),
 	}
 }
@@ -245,7 +248,7 @@ func (w *worker) sendResultToEnvelope(env envelope, result HandleResult) {
 func (w *worker) executeHandler(ctx context.Context, msg any) HandleResult {
 	result := w.handler.Handle(ctx, msg)
 	if result.Status == HandleStatusFail && result.Err != nil {
-		log.Printf("worker %s: handle error: %v", w.name, result.Err)
+		w.log.Error("handle error", "error", result.Err)
 	}
 	return result
 }
@@ -261,10 +264,10 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	err := panicToError(v)
 	w.panicCount++
 	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
-	log.Printf("worker %s: panic recovered (attempt %d): %v", w.name, w.panicCount, err)
+	w.log.Warn("panic recovered", "attempt", w.panicCount, "error", err)
 
 	if w.config.MaxPanicAttempts > 0 && w.panicCount >= w.config.MaxPanicAttempts {
-		log.Printf("worker %s: max panic attempts (%d) reached, stopping", w.name, w.config.MaxPanicAttempts)
+		w.log.Error("max panic attempts reached, stopping", "attempts", w.config.MaxPanicAttempts)
 		w.cancel()
 		return
 	}

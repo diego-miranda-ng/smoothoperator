@@ -18,6 +18,7 @@
 //
 //	ctx := context.Background()
 //	op := smoothoperator.NewOperator(ctx)
+//	// Or with a custom logger: op := smoothoperator.NewOperator(ctx, smoothoperator.WithLogger(myLogger))
 //	_, err := op.AddHandler("my-worker", myHandler, smoothoperator.Config{})
 //	if err != nil { ... }
 //	op.Start("my-worker")

@@ -3,6 +3,7 @@ package smoothoperator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func (panicHandler) Handle(context.Context, any) HandleResult { panic("test pani
 func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	w := newWorker("w", quickHandler{"w"}, Config{})
+	w := newWorker("w", quickHandler{"w"}, Config{}, slog.Default().With("worker", "w"))
 	require.NoError(t, w.Start(ctx))
 	require.NoError(t, w.Start(ctx))
 	<-w.Stop()
@@ -71,7 +72,7 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 
 func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testing.T) {
 	t.Parallel()
-	w := newWorker("w", quickHandler{"w"}, Config{})
+	w := newWorker("w", quickHandler{"w"}, Config{}, slog.Default().With("worker", "w"))
 	ch := w.Stop()
 	require.NotNil(t, ch)
 	_, open := <-ch
@@ -80,14 +81,14 @@ func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testi
 
 func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
 	t.Parallel()
-	w := newWorker("my-name", quickHandler{"x"}, Config{})
+	w := newWorker("my-name", quickHandler{"x"}, Config{}, slog.Default().With("worker", "my-name"))
 	require.Equal(t, "my-name", w.getName())
 	require.Equal(t, StatusStopped, w.getStatus())
 }
 
 func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 	t.Parallel()
-	w := newWorker("idle", idleHandler{15 * time.Millisecond}, Config{})
+	w := newWorker("idle", idleHandler{15 * time.Millisecond}, Config{}, slog.Default().With("worker", "idle"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -97,7 +98,7 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 
 func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T) {
 	t.Parallel()
-	w := newWorker("idle", idleHandler{5 * time.Second}, Config{})
+	w := newWorker("idle", idleHandler{5 * time.Second}, Config{}, slog.Default().With("worker", "idle"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -107,7 +108,7 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 
 func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.T) {
 	t.Parallel()
-	w := newWorker("idle", noneZeroHandler{}, Config{})
+	w := newWorker("idle", noneZeroHandler{}, Config{}, slog.Default().With("worker", "idle"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(30 * time.Millisecond)
@@ -118,7 +119,7 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	t.Parallel()
 	err := fmt.Errorf("handler failed")
-	w := newWorker("fail", failHandler{err: err, idle: 15 * time.Millisecond}, Config{})
+	w := newWorker("fail", failHandler{err: err, idle: 15 * time.Millisecond}, Config{}, slog.Default().With("worker", "fail"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -128,7 +129,7 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 
 func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T) {
 	t.Parallel()
-	w := newWorker("panic-worker", panicHandler{}, Config{})
+	w := newWorker("panic-worker", panicHandler{}, Config{}, slog.Default().With("worker", "panic-worker"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	require.NoError(t, w.Start(ctx))
@@ -144,7 +145,7 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 
 func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	t.Parallel()
-	w := newWorker("panic-worker", panicHandler{}, Config{MaxPanicAttempts: 3})
+	w := newWorker("panic-worker", panicHandler{}, Config{MaxPanicAttempts: 3}, slog.Default().With("worker", "panic-worker"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	deadline := time.Now().Add(10 * time.Second)
@@ -194,7 +195,7 @@ func (h *msgRecordHandler) getMessages() []any {
 func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
 	t.Parallel()
 	h := &msgRecordHandler{idle: 5 * time.Second}
-	w := newWorker("w", h, Config{})
+	w := newWorker("w", h, Config{}, slog.Default().With("worker", "w"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond) // let worker enter idle
@@ -219,7 +220,7 @@ func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
 func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
 	t.Parallel()
 	h := &msgRecordHandler{idle: 10 * time.Second}
-	w := newWorker("w", h, Config{})
+	w := newWorker("w", h, Config{}, slog.Default().With("worker", "w"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	time.Sleep(50 * time.Millisecond) // ensure worker enters idle
@@ -244,7 +245,7 @@ func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
 
 func TestUnwrapEnvelope_WhenZeroValue_ShouldReturnNilWithoutPanic(t *testing.T) {
 	t.Parallel()
-	w := newWorker("w", noopHandler{}, Config{})
+	w := newWorker("w", noopHandler{}, Config{}, slog.Default().With("worker", "w"))
 
 	require.NotPanics(t, func() {
 		msg := w.unwrapEnvelope(envelope{})
@@ -254,7 +255,7 @@ func TestUnwrapEnvelope_WhenZeroValue_ShouldReturnNilWithoutPanic(t *testing.T) 
 
 func TestUnwrapEnvelope_WhenValid_ShouldCloseDeliveredAndReturnMsg(t *testing.T) {
 	t.Parallel()
-	w := newWorker("w", noopHandler{}, Config{})
+	w := newWorker("w", noopHandler{}, Config{}, slog.Default().With("worker", "w"))
 
 	delivered := make(chan struct{})
 	env := envelope{msg: "payload", delivered: delivered}
@@ -275,7 +276,7 @@ func TestUnwrapEnvelope_WhenValid_ShouldCloseDeliveredAndReturnMsg(t *testing.T)
 func TestWorker_WhenNoMessage_ShouldPassNilToHandler(t *testing.T) {
 	t.Parallel()
 	h := &msgRecordHandler{idle: 15 * time.Millisecond}
-	w := newWorker("w", h, Config{})
+	w := newWorker("w", h, Config{}, slog.Default().With("worker", "w"))
 	ctx := context.Background()
 	require.NoError(t, w.Start(ctx))
 	// Let the worker loop several times without any messages
