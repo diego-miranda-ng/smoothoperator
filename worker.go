@@ -8,18 +8,23 @@ import (
 	"time"
 )
 
-// defaultPanicBackoff is the duration the worker sleeps after recovering a panic
-// before calling Handle again.
-const defaultPanicBackoff = time.Second
+const (
+	// defaultPanicBackoff is the duration the worker sleeps after recovering a panic
+	// before calling Handle again.
+	defaultPanicBackoff = time.Second
+
+	// defaultMessageBufferSize is the capacity of the worker's message channel when not set.
+	defaultMessageBufferSize = 1
+)
 
 // config holds optional settings for a worker. It is configured via HandlerOption
 // when registering a handler with AddHandler.
 type config struct {
-	maxPanicAttempts  int
-	panicBackoff      time.Duration
-	messageBufferSize int
+	maxPanicAttempts   int
+	panicBackoff       time.Duration
+	messageBufferSize  int
 	maxDispatchTimeout time.Duration
-	messageOnly       bool
+	messageOnly        bool
 }
 
 // HandlerOption configures a worker at registration time. Use WithMaxPanicAttempts,
@@ -57,11 +62,23 @@ func WithMessageOnly(b bool) HandlerOption {
 	return func(c *config) { c.messageOnly = b }
 }
 
-// applyHandlerOptions applies the given options to a zero config and returns it.
+// applyHandlerOptions applies the given options and returns a config with defaults
+// applied so that messageBufferSize and panicBackoff are never zero when the
+// default behavior is desired. Downstream code can use config fields directly.
 func applyHandlerOptions(opts ...HandlerOption) config {
-	var c config
+	c := config{
+		messageBufferSize: defaultMessageBufferSize,
+		panicBackoff:      defaultPanicBackoff,
+	}
 	for _, opt := range opts {
 		opt(&c)
+	}
+	// Normalize so 0 from options means "use default" (avoids conditionals elsewhere).
+	if c.messageBufferSize <= 0 {
+		c.messageBufferSize = defaultMessageBufferSize
+	}
+	if c.panicBackoff <= 0 {
+		c.panicBackoff = defaultPanicBackoff
 	}
 	return c
 }
@@ -112,17 +129,13 @@ type worker struct {
 // with the given config. The worker starts in StatusStopped; call Start to run it.
 // logger is the worker's logger (typically a child of the operator's logger with "worker" set).
 func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *worker {
-	bufSize := cfg.messageBufferSize
-	if bufSize <= 0 {
-		bufSize = 1
-	}
 	return &worker{
 		name:    name,
 		handler: handler,
 		config:  cfg,
 		status:  StatusStopped,
 		done:    make(chan struct{}),
-		msgCh:   make(chan envelope, bufSize),
+		msgCh:   make(chan envelope, cfg.messageBufferSize),
 		log:     logger,
 		metrics: newMetricsRecorder(name),
 	}
@@ -341,10 +354,7 @@ func (w *worker) getMaxDispatchTimeout() time.Duration {
 	return w.config.maxDispatchTimeout
 }
 
-// getPanicBackoff returns the effective panic backoff duration (config value or default).
+// getPanicBackoff returns the panic backoff duration (always set by applyHandlerOptions).
 func (w *worker) getPanicBackoff() time.Duration {
-	if w.config.panicBackoff > 0 {
-		return w.config.panicBackoff
-	}
-	return defaultPanicBackoff
+	return w.config.panicBackoff
 }
