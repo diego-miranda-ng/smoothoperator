@@ -118,7 +118,7 @@ func (op *operator) RemoveHandler(name string) error {
 	op.mu.Unlock()
 
 	// Stop the worker (if running) and wait for it to finish.
-	<-w.Stop(context.Background())
+	<-w.Stop()
 	return nil
 }
 
@@ -212,7 +212,7 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 		return nil, fmt.Errorf("worker %s not found", name)
 	}
 
-	return worker.Stop(context.Background()), nil
+	return worker.Stop(), nil
 }
 
 func (op *operator) StopAll() chan struct{} {
