@@ -64,11 +64,13 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-
-	// Act
 	_, err := op.AddHandler("a", internal.QuickHandler())
 	require.NoError(t, err)
+
+	// Act
 	w, err := op.AddHandler("a", internal.QuickHandler())
+
+	// Assert
 	require.Error(t, err)
 	require.Nil(t, w, "worker should be nil when error occurs")
 	require.True(t, errors.Is(err, smoothoperator.ErrWorkerAlreadyExists), "err should be ErrWorkerAlreadyExists")
@@ -160,7 +162,7 @@ func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testi
 	require.False(t, open, "channel should be closed immediately when worker was never started")
 }
 
-func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
+func TestWorker_WhenCreated_ShouldStoppedStatus(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
