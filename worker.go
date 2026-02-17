@@ -224,7 +224,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 		return
 	}
 
-	err := panicToError(v)
+	err := w.panicToError(v)
 	w.panicCount++
 	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
 	w.log.Warn("panic recovered", "attempt", w.panicCount, "error", err)
@@ -244,7 +244,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 }
 
 // panicToError converts a recovered panic value to an error for logging.
-func panicToError(v interface{}) error {
+func (w *worker) panicToError(v interface{}) error {
 	if err, ok := v.(error); ok {
 		return err
 	}
