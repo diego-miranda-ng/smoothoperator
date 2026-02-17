@@ -219,7 +219,7 @@ func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	_, err := op.AddHandler("w1", quickHandler())
-		require.NoError(t, err)
+	require.NoError(t, err)
 	_, err = op.AddHandler("w2", quickHandler())
 	require.NoError(t, err)
 

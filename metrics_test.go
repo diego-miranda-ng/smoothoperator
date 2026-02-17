@@ -1,29 +1,21 @@
-package smoothoperator
+package smoothoperator_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/diego-miranda-ng/smoothoperator"
+	"github.com/diego-miranda-ng/smoothoperator/internal"
 	"github.com/stretchr/testify/require"
 )
 
-type metricsTestHandler struct {
-	fn func(context.Context, any) HandleResult
-}
-
-func (h metricsTestHandler) Handle(ctx context.Context, msg any) HandleResult {
-	if h.fn != nil {
-		return h.fn(ctx, msg)
-	}
-	return Done()
-}
-
 func TestMetricsRecorder_LastMetric_WhenNoEvents_ReturnsFalse(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
-	op := NewOperator(context.Background())
-	_, err := op.AddHandler("w", metricsTestHandler{})
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
@@ -37,9 +29,10 @@ func TestMetricsRecorder_LastMetric_WhenNoEvents_ReturnsFalse(t *testing.T) {
 
 func TestMetricsRecorder_LastMetric_WhenWorkerRan_ReturnsLatestEvent(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
-	op := NewOperator(context.Background())
-	_, err := op.AddHandler("w", metricsTestHandler{})
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
 	time.Sleep(50 * time.Millisecond)
@@ -53,21 +46,22 @@ func TestMetricsRecorder_LastMetric_WhenWorkerRan_ReturnsLatestEvent(t *testing.
 
 	// Assert
 	require.True(t, ok)
-	require.Equal(t, MetricKindHandle, ev.Kind)
+	require.Equal(t, smoothoperator.MetricKindHandle, ev.Kind)
 	require.Equal(t, "w", ev.Worker)
-	require.Equal(t, HandleStatusDone, ev.Status)
+	require.Equal(t, smoothoperator.HandleStatusDone, ev.Status)
 }
 
 func TestMetricsRecorder_Metrics_WhenChannelCreated_ReturnsChannelThatReceivesEvents(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
-	op := NewOperator(context.Background())
-	_, err := op.AddHandler("w", metricsTestHandler{})
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
 	ch := w.Metrics(10)
-	var got []MetricEvent
+	var got []smoothoperator.MetricEvent
 	done := make(chan struct{})
 	go func() {
 		for ev := range ch {
@@ -86,10 +80,10 @@ func TestMetricsRecorder_Metrics_WhenChannelCreated_ReturnsChannelThatReceivesEv
 	require.NotEmpty(t, got)
 	var hasLifecycle, hasHandle bool
 	for _, ev := range got {
-		if ev.Kind == MetricKindLifecycle {
+		if ev.Kind == smoothoperator.MetricKindLifecycle {
 			hasLifecycle = true
 		}
-		if ev.Kind == MetricKindHandle {
+		if ev.Kind == smoothoperator.MetricKindHandle {
 			hasHandle = true
 		}
 	}
@@ -99,15 +93,19 @@ func TestMetricsRecorder_Metrics_WhenChannelCreated_ReturnsChannelThatReceivesEv
 
 func TestMetricsRecorder_Metrics_WithZeroBufferSize_CreatesChannel(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
-	op := NewOperator(context.Background())
-	_, err := op.AddHandler("w", metricsTestHandler{})
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("w", internal.NewHandlerMock(func(context.Context, any) smoothoperator.HandleResult { return smoothoperator.Done() }))
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
 	ch := w.Metrics(0)
 	// Consume in background so worker is not blocked when sending metrics
-	go func() { for range ch {} }()
+	go func() {
+		for range ch {
+		}
+	}()
 
 	// Act
 	require.NoError(t, op.Start("w"))
