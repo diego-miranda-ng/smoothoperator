@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -70,7 +69,7 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Act
-	w, err := op.AddHandler("a", quickHandler())
+	w, err := op.AddHandler("a", internal.QuickHandler())
 
 	// Assert
 	require.Error(t, err)
@@ -224,7 +223,7 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 
 	idleDur := 2 * time.Second // long enough that worker is in time.After; Stop() must cancel before this elapses
 	op := smoothoperator.NewOperator(context.Background())
-	h := idleHandler(idleDur)
+	h := internal.IdleHandler(idleDur)
 	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
