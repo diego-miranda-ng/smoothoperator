@@ -110,7 +110,7 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 	}
 
 	cfg := applyHandlerOptions(opts...)
-	w := newWorker(name, handler, cfg, op.log.With("worker", name))
+	w := newWorker(name, handler, cfg, op.log)
 	op.workers[name] = w
 	if aware, ok := handler.(DispatcherAware); ok {
 		aware.SetDispatcher(op)

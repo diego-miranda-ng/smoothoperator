@@ -289,7 +289,7 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 		}
 		return smoothoperator.Done()
 	})
-	capture := &captureHandler{}
+	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
 	_, err := op.AddHandler("fail", h)
@@ -313,6 +313,16 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	require.GreaterOrEqual(t, elapsed, idleDur, "worker should sleep for IdleDuration after Fail; got %v between calls", elapsed)
 	require.Contains(t, strings.Join(msgs, "\n"), "handle error", "expected worker to log 'handle error'; got: %v", msgs)
 	require.Contains(t, strings.Join(msgs, "\n"), "worker handler failed", "expected worker to log 'worker handler failed'; got: %v", msgs)
+
+	// Assert structured attributes on "handle error" log records
+	errorRecords := capture.findByMessage("handle error")
+	require.NotEmpty(t, errorRecords, "expected at least one 'handle error' record")
+	rec := errorRecords[0]
+	require.Equal(t, slog.LevelError, rec.Level, "handle error should be logged at ERROR level")
+	require.Equal(t, "fail", rec.Attrs["worker"], "expected default attr worker=fail")
+	require.Equal(t, "false", rec.Attrs["config_message_only"], "expected default attr config_message_only")
+	require.Contains(t, rec.Attrs["error"], "worker handler failed", "expected error attr to contain handler error")
+	require.Equal(t, "fail", rec.Attrs["status"], "expected status attr on handle error record")
 }
 
 func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T) {
@@ -348,7 +358,9 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	t.Parallel()
 
-	op := smoothoperator.NewOperator(context.Background())
+	capture := newCaptureHandler()
+	logger := slog.New(capture)
+	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
 	_, err := op.AddHandler("panic-worker", internal.PanicHandler(), smoothoperator.WithMaxPanicAttempts(3))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("panic-worker"))
@@ -365,6 +377,32 @@ func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	status, err := op.Status("panic-worker")
 	require.NoError(t, err)
 	require.Equal(t, smoothoperator.StatusStopped, status, "worker should stop itself after max panic attempts")
+
+	// Assert panic-related logs
+	panicRecords := capture.findByMessage("panic recovered")
+	require.NotEmpty(t, panicRecords, "expected 'panic recovered' logs")
+	for _, rec := range panicRecords {
+		require.Equal(t, slog.LevelWarn, rec.Level, "'panic recovered' should be WARN level")
+		require.Equal(t, "panic-worker", rec.Attrs["worker"], "expected default attr worker=panic-worker")
+		require.Contains(t, rec.Attrs, "attempt", "expected attempt attr on panic recovered record")
+		require.Contains(t, rec.Attrs, "max_attempts", "expected max_attempts attr on panic recovered record")
+		require.Contains(t, rec.Attrs, "error", "expected error attr on panic recovered record")
+	}
+
+	backoffRecords := capture.findByMessage("backing off after panic")
+	require.NotEmpty(t, backoffRecords, "expected 'backing off after panic' logs")
+	for _, rec := range backoffRecords {
+		require.Equal(t, "panic-worker", rec.Attrs["worker"], "expected default attr worker=panic-worker")
+		require.Contains(t, rec.Attrs, "duration", "expected duration attr on backoff record")
+		require.Contains(t, rec.Attrs, "attempt", "expected attempt attr on backoff record")
+	}
+
+	maxRecords := capture.findByMessage("max panic attempts reached")
+	require.Len(t, maxRecords, 1, "expected exactly one 'max panic attempts reached' log")
+	require.Equal(t, slog.LevelError, maxRecords[0].Level, "'max panic attempts reached' should be ERROR level")
+	require.Equal(t, "panic-worker", maxRecords[0].Attrs["worker"], "expected default attr worker=panic-worker")
+	require.Equal(t, "3", maxRecords[0].Attrs["attempts"], "expected attempts=3")
+	require.Equal(t, "3", maxRecords[0].Attrs["config_max_panic_attempts"], "expected config default attr config_max_panic_attempts=3")
 }
 
 func TestRemoveHandler_WhenWorkerRunning_ShouldStopAndRemoveWorker(t *testing.T) {
@@ -722,7 +760,9 @@ func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
 	t.Parallel()
 
 	// Worker with buffer 1 and a handler that blocks so the buffer can fill
-	op := smoothoperator.NewOperator(context.Background())
+	capture := newCaptureHandler()
+	logger := slog.New(capture)
+	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
 	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.WithMessageBufferSize(1))
 	require.NoError(t, err)
 	require.NoError(t, op.Start("w"))
@@ -747,6 +787,16 @@ func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
 	require.Contains(t, err.Error(), context.DeadlineExceeded.Error())
 
 	<-op.StopAll()
+
+	// Assert dispatch failure was logged with structured context
+	failRecords := capture.findByMessage("dispatch failed")
+	require.NotEmpty(t, failRecords, "expected 'dispatch failed' log when dispatch times out")
+	rec := failRecords[0]
+	require.Equal(t, slog.LevelWarn, rec.Level, "dispatch failure should be WARN level")
+	require.Equal(t, "w", rec.Attrs["worker"], "expected default attr worker=w")
+	require.Contains(t, rec.Attrs, "error", "expected error attr on dispatch failure record")
+	require.Equal(t, "third", rec.Attrs["message"], "expected message attr to be the failed message payload")
+	require.Contains(t, rec.Attrs, "config_message_buffer_size", "expected config default attr on dispatch failure record")
 }
 
 func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *testing.T) {
@@ -978,7 +1028,7 @@ func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
 func TestNewOperator_WithLogger_ShouldSendWorkerLogsToCustomLogger(t *testing.T) {
 	t.Parallel()
 
-	capture := &captureHandler{}
+	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
 
@@ -995,10 +1045,29 @@ func TestNewOperator_WithLogger_ShouldSendWorkerLogsToCustomLogger(t *testing.T)
 	msgs := capture.messages()
 	var found bool
 	for _, m := range msgs {
-		if m == "handle error" {
+		if strings.HasPrefix(m, "handle error") {
 			found = true
 			break
 		}
 	}
-	require.True(t, found, "expected custom logger to receive worker log 'handle error', got: %v", msgs)
+	require.True(t, found, "expected custom logger to receive worker log starting with 'handle error', got: %v", msgs)
+
+	// Assert lifecycle messages are present
+	require.NotEmpty(t, capture.findByMessage("starting worker"), "expected 'starting worker' log")
+	require.NotEmpty(t, capture.findByMessage("stopping worker"), "expected 'stopping worker' log")
+	require.NotEmpty(t, capture.findByMessage("worker stopped"), "expected 'worker stopped' log")
+
+	// Assert worker-emitted records carry the default attrs from initLogger.
+	// Records with config attrs come from the worker logger; operator-level records
+	// (e.g. "handler added", "worker started") only have "worker" added per-call.
+	var workerRecordCount int
+	for _, rec := range capture.records() {
+		if _, hasConfig := rec.Attrs["config_message_only"]; !hasConfig {
+			continue
+		}
+		workerRecordCount++
+		require.Equal(t, "fail", rec.Attrs["worker"], "expected worker=fail on record %q", rec.Message)
+		require.Contains(t, rec.Attrs, "config_max_panic_attempts", "expected default config attr on record %q", rec.Message)
+	}
+	require.GreaterOrEqual(t, workerRecordCount, 3, "expected at least 3 worker-emitted records with config attrs (start, handle error, stop)")
 }
