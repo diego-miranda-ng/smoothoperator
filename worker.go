@@ -52,18 +52,34 @@ type worker struct {
 
 // newWorker creates a worker that runs the given handler under the given name
 // with the given config. The worker starts in StatusStopped; call start to run it.
-// logger is the worker's logger (typically a child of the operator's logger with "worker" set).
+// logger is the base logger (typically the operator's logger); initLogger derives
+// a child with the worker name and config baked in as default attributes.
 func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *worker {
-	return &worker{
+	w := &worker{
 		name:    name,
 		handler: handler,
 		config:  cfg,
 		status:  StatusStopped,
 		done:    make(chan struct{}),
 		msgCh:   make(chan envelope, cfg.messageBufferSize),
-		log:     logger,
 		metrics: newMetricsRecorder(name),
 	}
+	w.log = w.initLogger(logger)
+	return w
+}
+
+// initLogger creates a child logger from the base logger with default attributes
+// for the worker name and all configuration fields. Every log emitted by this
+// worker will carry these attributes automatically.
+func (w *worker) initLogger(logger *slog.Logger) *slog.Logger {
+	return logger.With(
+		"worker", w.name,
+		"config_message_only", w.config.messageOnly,
+		"config_max_panic_attempts", w.config.maxPanicAttempts,
+		"config_panic_backoff", w.config.panicBackoff,
+		"config_message_buffer_size", w.config.messageBufferSize,
+		"config_max_dispatch_timeout", w.config.maxDispatchTimeout,
+	)
 }
 
 // start starts the worker loop in a new goroutine. The loop runs until ctx is
@@ -82,6 +98,8 @@ func (w *worker) start(ctx context.Context) error {
 	w.status = StatusRunning
 	w.panicCount = 0
 	w.mu.Unlock()
+
+	w.log.Info("starting worker")
 
 	go func() {
 		defer close(w.done)
@@ -108,11 +126,13 @@ func (w *worker) stop() chan struct{} {
 	defer w.mu.Unlock()
 
 	if w.cancel == nil {
+		w.log.Debug("stop called on inactive worker", "status", w.status)
 		stopped := make(chan struct{})
 		close(stopped)
 		return stopped
 	}
 
+	w.log.Info("stopping worker", "status", w.status)
 	w.cancel()
 	return w.done
 }
@@ -122,6 +142,7 @@ func (w *worker) runLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			w.log.Debug("poll loop exiting", "reason", ctx.Err())
 			return
 		default:
 			w.handle(ctx)
@@ -134,6 +155,7 @@ func (w *worker) runMessageOnly(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			w.log.Debug("message-only loop exiting", "reason", ctx.Err())
 			return
 		case raw := <-w.msgCh:
 			w.processEnvelope(ctx, raw)
@@ -150,8 +172,13 @@ func (w *worker) processEnvelope(ctx context.Context, raw envelope) HandleResult
 
 	start := time.Now()
 	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+	elapsed := time.Since(start)
+
 	w.sendResultToEnvelope(raw, result)
-	w.metrics.Record(w.metrics.handleEvent(result, time.Since(start), true))
+
+	w.metrics.Record(w.metrics.handleEvent(result, elapsed, true))
+	w.log.Debug("envelope processed", "status", result.Status, "duration", elapsed, "message", raw.msg)
+
 	return result
 }
 
@@ -170,20 +197,31 @@ func (w *worker) handle(ctx context.Context) {
 	hadMessage := raw.resultCh != nil
 	start := time.Now()
 	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+	elapsed := time.Since(start)
+
 	w.sendResultToEnvelope(raw, result)
-	w.metrics.Record(w.metrics.handleEvent(result, time.Since(start), hadMessage))
+
+	w.metrics.Record(w.metrics.handleEvent(result, elapsed, hadMessage))
+	w.log.Debug("handle completed", "status", result.Status, "had_message", hadMessage, "duration", elapsed)
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
+		w.log.Debug("entering idle", "duration", result.IdleDuration, "status", result.Status, "had_message", hadMessage)
 		select {
 		case <-ctx.Done():
+			w.log.Debug("idle interrupted by context cancellation", "reason", ctx.Err())
 			return
 		case raw := <-w.msgCh:
-			// Woken up by an incoming message; execute the handler immediately.
+			w.log.Debug("idle interrupted by incoming message", "message", raw.msg)
 			start := time.Now()
 			result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+			elapsed := time.Since(start)
+
 			w.sendResultToEnvelope(raw, result)
-			w.metrics.Record(w.metrics.handleEvent(result, time.Since(start), true))
+
+			w.metrics.Record(w.metrics.handleEvent(result, elapsed, true))
+			w.log.Debug("handle completed", "status", result.Status, "had_message", hadMessage, "duration", elapsed)
 		case <-time.After(result.IdleDuration):
+			w.log.Debug("idle period elapsed", "duration", result.IdleDuration)
 		}
 	}
 }
@@ -213,8 +251,9 @@ func (w *worker) executeHandler(ctx context.Context, msg any) HandleResult {
 	if result.Status == HandleStatusFail && result.Err != nil {
 		w.log.Error(
 			fmt.Sprintf("handle error: %s", result.Err.Error()),
+			"status", result.Status,
 			"message", msg,
-			"result", result,
+			"idle_duration", result.IdleDuration,
 			"error", result.Err,
 		)
 	}
@@ -232,7 +271,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	err := w.panicToError(v)
 	w.panicCount++
 	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
-	w.log.Warn("panic recovered", "attempt", w.panicCount, "error", err)
+	w.log.Warn("panic recovered", "attempt", w.panicCount, "max_attempts", w.config.maxPanicAttempts, "error", err)
 
 	if w.config.maxPanicAttempts > 0 && w.panicCount >= w.config.maxPanicAttempts {
 		w.log.Error("max panic attempts reached, stopping", "attempts", w.config.maxPanicAttempts)
@@ -240,10 +279,12 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 		return
 	}
 
+	backoff := w.getPanicBackoff()
+	w.log.Info("backing off after panic", "duration", backoff, "attempt", w.panicCount)
 	w.mu.Unlock()
 	select {
 	case <-ctx.Done():
-	case <-time.After(w.getPanicBackoff()):
+	case <-time.After(backoff):
 	}
 	w.mu.Lock()
 }
@@ -259,6 +300,7 @@ func (w *worker) panicToError(v interface{}) error {
 // emitStoppedAndCloseMetrics emits a lifecycle "stopped" event then closes the metrics channel.
 // Called from the worker goroutine when the run loop exits.
 func (w *worker) emitStoppedAndCloseMetrics() {
+	w.log.Info("worker stopped")
 	w.metrics.Record(w.metrics.lifecycleEvent("stopped"))
 	w.metrics.CloseChannel()
 }
@@ -304,9 +346,11 @@ func (w *worker) asWorker() Worker {
 func (w *worker) sendEnvelope(ctx context.Context, env envelope) bool {
 	select {
 	case w.msgCh <- env:
+		w.log.Debug("message dispatched", "message", env.msg)
 		w.metrics.Record(w.metrics.dispatchEvent(true, nil))
 		return true
 	case <-ctx.Done():
+		w.log.Warn("dispatch failed: context done", "error", ctx.Err(), "message", env.msg)
 		w.metrics.Record(w.metrics.dispatchEvent(false, ctx.Err()))
 		return false
 	}
