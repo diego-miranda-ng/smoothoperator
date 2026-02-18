@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,13 +182,26 @@ func TestWorker_WhenCreated_ShouldStoppedStatus(t *testing.T) {
 func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
+	// Arrange: handler records time of first and second Handle call; first returns None(15ms) so worker sleeps
+	idleDur := 15 * time.Millisecond
+	var firstCall, secondCall time.Time
+	var callCount int
+	h := internal.NewHandlerMock(func(ctx context.Context, msg any) smoothoperator.HandleResult {
+		callCount++
+		if callCount == 1 {
+			firstCall = time.Now()
+			return smoothoperator.None(idleDur)
+		}
+		if callCount == 2 {
+			secondCall = time.Now()
+		}
+		return smoothoperator.Done()
+	})
 	op := smoothoperator.NewOperator(context.Background())
-	h := internal.IdleHandler(15 * time.Millisecond)
 	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // allow at least one full cycle: Handle -> sleep -> Handle
 
 	// Act
 	ch, err := op.Stop("idle")
@@ -198,36 +212,47 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 	status, err := op.Status("idle")
 	require.NoError(t, err)
 	require.Equal(t, smoothoperator.StatusStopped, status)
+	require.GreaterOrEqual(t, callCount, 2, "worker should have called Handle at least twice (once before sleep, once after)")
+	require.False(t, secondCall.IsZero(), "second Handle call should have been recorded")
+	elapsed := secondCall.Sub(firstCall)
+	require.GreaterOrEqual(t, elapsed, idleDur, "worker should sleep for at least the defined idle duration between Handle calls; got %v", elapsed)
 }
 
 func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T) {
 	t.Parallel()
 
-	// Arrange (long idle so worker is in time.After; Stop() cancels ctx so select gets <-ctx.Done())
+	idleDur := 2 * time.Second // long enough that worker is in time.After; Stop() must cancel before this elapses
 	op := smoothoperator.NewOperator(context.Background())
-	h := internal.IdleHandler(5 * time.Second)
+	h := internal.IdleHandler(idleDur)
 	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
 	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle sleep
 
-	// Act
+	// Act: stop while worker is in idle sleep; must complete before full idle duration
 	ch, err := op.Stop("idle")
 	require.NoError(t, err)
+	start := time.Now()
 	<-ch
+	elapsed := time.Since(start)
 
-	// Assert
+	// Assert: worker stopped and exited the idle sleep early (did not wait full idleDur)
 	status, err := op.Status("idle")
 	require.NoError(t, err)
 	require.Equal(t, smoothoperator.StatusStopped, status)
+	require.Less(t, elapsed, idleDur, "worker should stop before full idle duration; stopped in %v (idle was %v)", elapsed, idleDur)
 }
 
 func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.T) {
 	t.Parallel()
 
-	// Arrange (covers handle() path where Status is None but IdleDuration is 0, no select)
+	// Arrange: handler returns None(0) so worker must not sleep; count Handle calls
+	var callCount int
+	h := internal.NewHandlerMock(func(ctx context.Context, msg any) smoothoperator.HandleResult {
+		callCount++
+		return smoothoperator.None(0)
+	})
 	op := smoothoperator.NewOperator(context.Background())
-	h := internal.NoneZeroHandler()
 	_, err := op.AddHandler("idle", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("idle"))
@@ -238,33 +263,56 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 	require.NoError(t, err)
 	<-ch
 
-	// Assert
+	// Assert: worker did not sleep (no select with time.After), so we get many calls in 30ms
 	status, err := op.Status("idle")
 	require.NoError(t, err)
 	require.Equal(t, smoothoperator.StatusStopped, status)
+	require.GreaterOrEqual(t, callCount, 10, "worker should not sleep when IdleDuration is 0; got %d Handle calls in 30ms (expected many)", callCount)
 }
 
 func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
-	handlerErr := fmt.Errorf("handler failed")
-	h := internal.FailHandler(handlerErr, 15*time.Millisecond)
-	op := smoothoperator.NewOperator(context.Background())
+	// Arrange: capture logs and record first/second Handle call to assert sleep
+	idleDur := 15 * time.Millisecond
+	handlerErr := fmt.Errorf("worker handler failed")
+	var firstCall, secondCall time.Time
+	var callCount int
+	h := internal.NewHandlerMock(func(ctx context.Context, msg any) smoothoperator.HandleResult {
+		callCount++
+		if callCount == 1 {
+			firstCall = time.Now()
+			return smoothoperator.Fail(handlerErr, idleDur)
+		}
+		if callCount == 2 {
+			secondCall = time.Now()
+		}
+		return smoothoperator.Done()
+	})
+	capture := &captureHandler{}
+	logger := slog.New(capture)
+	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
 	_, err := op.AddHandler("fail", h)
 	require.NoError(t, err)
 	require.NoError(t, op.Start("fail"))
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // allow at least one full cycle: Handle -> log + sleep -> Handle
 
 	// Act
 	ch, err := op.Stop("fail")
 	require.NoError(t, err)
 	<-ch
 
-	// Assert
+	// Assert: worker stopped, slept after Fail, and logged the error
+	msgs := capture.messages()
+	elapsed := secondCall.Sub(firstCall)
 	status, err := op.Status("fail")
 	require.NoError(t, err)
 	require.Equal(t, smoothoperator.StatusStopped, status)
+	require.GreaterOrEqual(t, callCount, 2, "worker should have called Handle at least twice (once before sleep, once after)")
+	require.False(t, secondCall.IsZero(), "second Handle call should have been recorded")
+	require.GreaterOrEqual(t, elapsed, idleDur, "worker should sleep for IdleDuration after Fail; got %v between calls", elapsed)
+	require.Contains(t, strings.Join(msgs, "\n"), "handle error", "expected worker to log 'handle error'; got: %v", msgs)
+	require.Contains(t, strings.Join(msgs, "\n"), "worker handler failed", "expected worker to log 'worker handler failed'; got: %v", msgs)
 }
 
 func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T) {

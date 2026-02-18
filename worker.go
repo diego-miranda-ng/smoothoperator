@@ -211,7 +211,12 @@ func (w *worker) sendResultToEnvelope(env envelope, result HandleResult) {
 func (w *worker) executeHandler(ctx context.Context, msg any) HandleResult {
 	result := w.handler.Handle(ctx, msg)
 	if result.Status == HandleStatusFail && result.Err != nil {
-		w.log.Error("handle error", "error", result.Err)
+		w.log.Error(
+			fmt.Sprintf("handle error: %s", result.Err.Error()),
+			"message", msg,
+			"result", result,
+			"error", result.Err,
+		)
 	}
 	return result
 }
