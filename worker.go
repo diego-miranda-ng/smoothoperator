@@ -163,6 +163,20 @@ func (w *worker) runMessageOnly(ctx context.Context) {
 	}
 }
 
+// runHandle executes the handler for one envelope, sends the result, records metrics, and logs. Caller holds w.mu.
+func (w *worker) runHandle(ctx context.Context, raw envelope, hadMessage bool) HandleResult {
+	start := time.Now()
+	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
+	elapsed := time.Since(start)
+
+	w.sendResultToEnvelope(raw, result)
+
+	w.metrics.Record(w.metrics.handleEvent(result, elapsed, hadMessage))
+	w.log.Debug("handle completed", "status", result.Status, "had_message", hadMessage, "duration", elapsed)
+
+	return result
+}
+
 // processEnvelope runs the handler for one envelope (with panic recovery) and sends the result.
 // Caller must not hold w.mu. Returns the HandleResult for use by handle() when checking IdleDuration.
 func (w *worker) processEnvelope(ctx context.Context, raw envelope) HandleResult {
@@ -171,14 +185,8 @@ func (w *worker) processEnvelope(ctx context.Context, raw envelope) HandleResult
 	defer w.onPanicRecovered(ctx)
 
 	start := time.Now()
-	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
-	elapsed := time.Since(start)
-
-	w.sendResultToEnvelope(raw, result)
-
-	w.metrics.Record(w.metrics.handleEvent(result, elapsed, true))
-	w.log.Debug("envelope processed", "status", result.Status, "duration", elapsed, "message", raw.msg)
-
+	result := w.runHandle(ctx, raw, true)
+	w.log.Debug("envelope processed", "status", result.Status, "duration", time.Since(start), "message", raw.msg)
 	return result
 }
 
@@ -195,14 +203,7 @@ func (w *worker) handle(ctx context.Context) {
 	}
 
 	hadMessage := raw.resultCh != nil
-	start := time.Now()
-	result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
-	elapsed := time.Since(start)
-
-	w.sendResultToEnvelope(raw, result)
-
-	w.metrics.Record(w.metrics.handleEvent(result, elapsed, hadMessage))
-	w.log.Debug("handle completed", "status", result.Status, "had_message", hadMessage, "duration", elapsed)
+	result := w.runHandle(ctx, raw, hadMessage)
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
 		w.log.Debug("entering idle", "duration", result.IdleDuration, "status", result.Status, "had_message", hadMessage)
@@ -212,14 +213,7 @@ func (w *worker) handle(ctx context.Context) {
 			return
 		case raw := <-w.msgCh:
 			w.log.Debug("idle interrupted by incoming message", "message", raw.msg)
-			start := time.Now()
-			result := w.executeHandler(ctx, w.unwrapEnvelope(raw))
-			elapsed := time.Since(start)
-
-			w.sendResultToEnvelope(raw, result)
-
-			w.metrics.Record(w.metrics.handleEvent(result, elapsed, true))
-			w.log.Debug("handle completed", "status", result.Status, "had_message", hadMessage, "duration", elapsed)
+			result = w.runHandle(ctx, raw, true)
 		case <-time.After(result.IdleDuration):
 			w.log.Debug("idle period elapsed", "duration", result.IdleDuration)
 		}
