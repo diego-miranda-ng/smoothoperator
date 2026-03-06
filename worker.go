@@ -211,7 +211,12 @@ func (w *worker) sendResultToEnvelope(env envelope, result HandleResult) {
 func (w *worker) executeHandler(ctx context.Context, msg any) HandleResult {
 	result := w.handler.Handle(ctx, msg)
 	if result.Status == HandleStatusFail && result.Err != nil {
-		w.log.Error("handle error", "error", result.Err)
+		w.log.Error(
+			fmt.Sprintf("handle error: %s", result.Err.Error()),
+			"message", msg,
+			"result", result,
+			"error", result.Err,
+		)
 	}
 	return result
 }
@@ -224,7 +229,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 		return
 	}
 
-	err := panicToError(v)
+	err := w.panicToError(v)
 	w.panicCount++
 	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
 	w.log.Warn("panic recovered", "attempt", w.panicCount, "error", err)
@@ -244,7 +249,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 }
 
 // panicToError converts a recovered panic value to an error for logging.
-func panicToError(v interface{}) error {
+func (w *worker) panicToError(v interface{}) error {
 	if err, ok := v.(error); ok {
 		return err
 	}
