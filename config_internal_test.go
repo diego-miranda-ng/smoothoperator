@@ -230,3 +230,11 @@ func TestApplyHandlerOptions_ZeroValuesNormalized_WhenMixedWithOtherOptions(t *t
 	assert.Equal(t, defaultPanicBackoff, cfg.panicBackoff)
 	assert.Equal(t, time.Duration(0), cfg.maxDispatchTimeout)
 }
+
+func TestDefaultConstants_Values(t *testing.T) {
+	t.Parallel()
+
+	// Assert
+	assert.Equal(t, 1, defaultMessageBufferSize)
+	assert.Equal(t, time.Second, defaultPanicBackoff)
+}
