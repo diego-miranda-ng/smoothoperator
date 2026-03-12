@@ -39,24 +39,34 @@ func TestDispatcherMock_Dispatch_WhenDispatchFuncNil_Panics(t *testing.T) {
 	})
 }
 
-func TestWorkerMock_Metrics_WhenMetricsFuncNil_Panics(t *testing.T) {
+func TestWorkerMock_HandleMetrics_WhenFuncNil_Panics(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	m := &WorkerMock{LastMetricFunc: func() (smoothoperator.MetricEvent, bool) { return smoothoperator.MetricEvent{}, false }}
-
-	// Act & Assert
-	require.PanicsWithValue(t, errWorkerMockMetricsNotConfigured, func() {
-		_ = m.Metrics(1)
+	m := &WorkerMock{}
+	require.PanicsWithValue(t, errWorkerMockHandleMetricsNotConfigured, func() {
+		_ = m.HandleMetrics(1)
 	})
 }
 
-func TestWorkerMock_LastMetric_WhenLastMetricFuncNil_Panics(t *testing.T) {
+func TestWorkerMock_PanicMetrics_WhenFuncNil_Panics(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	m := &WorkerMock{MetricsFunc: func(int) <-chan smoothoperator.MetricEvent { return nil }}
+	m := &WorkerMock{}
+	require.PanicsWithValue(t, errWorkerMockPanicMetricsNotConfigured, func() {
+		_ = m.PanicMetrics(1)
+	})
+}
 
-	// Act & Assert
-	require.PanicsWithValue(t, errWorkerMockLastMetricNotConfigured, func() {
-		_, _ = m.LastMetric()
+func TestWorkerMock_DispatchMetrics_WhenFuncNil_Panics(t *testing.T) {
+	t.Parallel()
+	m := &WorkerMock{}
+	require.PanicsWithValue(t, errWorkerMockDispatchMetricsNotConfigured, func() {
+		_ = m.DispatchMetrics(1)
+	})
+}
+
+func TestWorkerMock_LifecycleMetrics_WhenFuncNil_Panics(t *testing.T) {
+	t.Parallel()
+	m := &WorkerMock{}
+	require.PanicsWithValue(t, errWorkerMockLifecycleMetricsNotConfigured, func() {
+		_ = m.LifecycleMetrics(1)
 	})
 }

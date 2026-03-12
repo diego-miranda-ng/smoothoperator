@@ -916,36 +916,7 @@ func TestWorker_WhenNotFound_ShouldReturnError(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
-func TestWorker_LastMetric_WhenNoEvents_ShouldReturnFalse(t *testing.T) {
-	t.Parallel()
-	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler())
-	require.NoError(t, err)
-	w, err := op.Worker("w")
-	require.NoError(t, err)
-	_, ok := w.LastMetric()
-	require.False(t, ok)
-}
-
-func TestWorker_LastMetric_WhenWorkerRuns_ShouldReturnLatestEvent(t *testing.T) {
-	t.Parallel()
-	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler())
-	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
-	defer func() { <-op.StopAll() }()
-	time.Sleep(50 * time.Millisecond)
-
-	w, err := op.Worker("w")
-	require.NoError(t, err)
-	ev, ok := w.LastMetric()
-	require.True(t, ok)
-	require.Equal(t, smoothoperator.MetricKindHandle, ev.Kind)
-	require.Equal(t, "w", ev.Worker)
-	require.Equal(t, smoothoperator.HandleStatusDone, ev.Status)
-}
-
-func TestWorker_Metrics_WhenReceiving_ShouldReceiveEventsThenClose(t *testing.T) {
+func TestWorker_Metrics_WhenReceiving_ShouldReceivePerKindEventsThenClose(t *testing.T) {
 	t.Parallel()
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, _ := internal.NewRecordingHandler(5 * time.Second)
@@ -953,43 +924,49 @@ func TestWorker_Metrics_WhenReceiving_ShouldReceiveEventsThenClose(t *testing.T)
 	require.NoError(t, err)
 	w, err := op.Worker("w")
 	require.NoError(t, err)
-	ch := w.Metrics(10)
-	var got []smoothoperator.MetricEvent
-	done := make(chan struct{})
+
+	handleCh := w.HandleMetrics(10)
+	dispatchCh := w.DispatchMetrics(10)
+	lifecycleCh := w.LifecycleMetrics(10)
+
+	var handleGot []smoothoperator.HandleMetricEvent
+	var dispatchGot []smoothoperator.DispatchMetricEvent
+	var lifecycleGot []smoothoperator.LifecycleMetricEvent
+	handleDone := make(chan struct{})
+	dispatchDone := make(chan struct{})
+	lifecycleDone := make(chan struct{})
 	go func() {
-		for ev := range ch {
-			got = append(got, ev)
+		for ev := range handleCh {
+			handleGot = append(handleGot, ev)
 		}
-		close(done)
+		close(handleDone)
+	}()
+	go func() {
+		for ev := range dispatchCh {
+			dispatchGot = append(dispatchGot, ev)
+		}
+		close(dispatchDone)
+	}()
+	go func() {
+		for ev := range lifecycleCh {
+			lifecycleGot = append(lifecycleGot, ev)
+		}
+		close(lifecycleDone)
 	}()
 	require.NoError(t, op.Start("w"))
 	time.Sleep(20 * time.Millisecond)
 	_, _, _ = op.Dispatch(context.Background(), "w", "hello")
 	time.Sleep(50 * time.Millisecond)
 	<-op.StopAll()
-	<-done
+	<-handleDone
+	<-dispatchDone
+	<-lifecycleDone
 
-	require.NotEmpty(t, got)
-	var hasLifecycleStarted, hasLifecycleStopped, hasHandle, hasDispatch bool
-	for _, ev := range got {
-		switch ev.Kind {
-		case smoothoperator.MetricKindLifecycle:
-			if ev.LifecycleEvent == "started" {
-				hasLifecycleStarted = true
-			}
-			if ev.LifecycleEvent == "stopped" {
-				hasLifecycleStopped = true
-			}
-		case smoothoperator.MetricKindHandle:
-			hasHandle = true
-		case smoothoperator.MetricKindDispatch:
-			hasDispatch = true
-		}
-	}
-	require.True(t, hasLifecycleStarted, "expected at least one lifecycle started")
-	require.True(t, hasLifecycleStopped, "expected lifecycle stopped after StopAll")
-	require.True(t, hasHandle, "expected at least one handle event")
-	require.True(t, hasDispatch, "expected at least one dispatch event")
+	require.NotEmpty(t, handleGot, "expected at least one handle event")
+	require.NotEmpty(t, dispatchGot, "expected at least one dispatch event")
+	require.GreaterOrEqual(t, len(lifecycleGot), 2, "expected started and stopped lifecycle events")
+	require.Equal(t, "started", lifecycleGot[0].Event)
+	require.Equal(t, "stopped", lifecycleGot[len(lifecycleGot)-1].Event)
 }
 
 func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
@@ -998,8 +975,8 @@ func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
 	_, err := op.AddHandler("w", internal.QuickHandler())
 	require.NoError(t, err)
 	w, _ := op.Worker("w")
-	ch := w.Metrics(10)
-	var got []smoothoperator.MetricEvent
+	ch := w.DispatchMetrics(10)
+	var got []smoothoperator.DispatchMetricEvent
 	done := make(chan struct{})
 	go func() {
 		for ev := range ch {
@@ -1017,7 +994,7 @@ func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
 
 	var hasDispatchOk bool
 	for _, ev := range got {
-		if ev.Kind == smoothoperator.MetricKindDispatch && ev.DispatchOk {
+		if ev.Ok {
 			hasDispatchOk = true
 			break
 		}

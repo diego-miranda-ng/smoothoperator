@@ -48,7 +48,7 @@ type Operator interface {
 	// Status returns the current status of the worker with the given name.
 	// Returns error if name not found.
 	Status(name string) (Status, error)
-	// Worker returns the Worker interface for the given name, for metrics (Metrics channel and LastMetric).
+	// Worker returns the Worker interface for the given name, for per-kind metrics channels.
 	// Returns error if name not found.
 	Worker(name string) (Worker, error)
 }
