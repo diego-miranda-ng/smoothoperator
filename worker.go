@@ -18,22 +18,10 @@ const (
 	StatusStopped Status = "stopped"
 )
 
-// Worker is the metrics view of a worker. Obtain it from Operator.AddHandler or
-// Operator.Worker(name). Each metric kind has its own channel, created lazily on
-// first call. Channels are closed when the worker stops.
 type Worker interface {
-	// HandleMetrics returns a channel that receives handle metric events.
-	// Created on first call with the given bufferSize; closed when the worker stops.
-	HandleMetrics(bufferSize int) <-chan HandleMetricEvent
-	// PanicMetrics returns a channel that receives panic metric events.
-	// Created on first call with the given bufferSize; closed when the worker stops.
-	PanicMetrics(bufferSize int) <-chan PanicMetricEvent
-	// DispatchMetrics returns a channel that receives dispatch metric events.
-	// Created on first call with the given bufferSize; closed when the worker stops.
-	DispatchMetrics(bufferSize int) <-chan DispatchMetricEvent
-	// LifecycleMetrics returns a channel that receives lifecycle metric events.
-	// Created on first call with the given bufferSize; closed when the worker stops.
-	LifecycleMetrics(bufferSize int) <-chan LifecycleMetricEvent
+	Name() string
+	Status() Status
+	Metrics() Metrics
 }
 
 // worker wraps a Handler and manages its state, status, and lifecycle. It runs
@@ -51,7 +39,7 @@ type worker struct {
 	msgCh      chan envelope // buffered channel for incoming messages
 	log        *slog.Logger
 
-	metrics metricsRecorder
+	metrics *metricsRecorder
 }
 
 // newWorker creates a worker that runs the given handler under the given name
@@ -70,6 +58,24 @@ func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *w
 	}
 	w.log = w.initLogger(logger)
 	return w
+}
+
+func (w *worker) Name() string {
+	return w.name
+}
+
+func (w *worker) Status() Status {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.status
+}
+
+func (w *worker) Metrics() Metrics {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.metrics
 }
 
 // initLogger creates a child logger from the base logger with default attributes
@@ -329,12 +335,6 @@ func (w *worker) getMaxDispatchTimeout() time.Duration {
 // getPanicBackoff returns the panic backoff duration (always set by applyHandlerOptions).
 func (w *worker) getPanicBackoff() time.Duration {
 	return w.config.panicBackoff
-}
-
-// asWorker returns the Worker interface for this worker (metrics view). Used by the operator
-// to expose the worker for AddHandler and Worker(name) without touching worker fields.
-func (w *worker) asWorker() Worker {
-	return &w.metrics
 }
 
 // sendEnvelope sends env to the worker's message channel and records the dispatch

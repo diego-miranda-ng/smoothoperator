@@ -26,6 +26,7 @@ func (h handlerFunc) Handle(ctx context.Context, msg any) HandleResult {
 
 func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 	t.Parallel()
+
 	// Arrange
 	quickHandle := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult {
 		select {

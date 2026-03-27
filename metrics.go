@@ -5,6 +5,24 @@ import (
 	"time"
 )
 
+// Worker is the metrics view of a worker. Obtain it from Operator.AddHandler or
+// Operator.Worker(name). Each metric kind has its own channel, created lazily on
+// first call. Channels are closed when the worker stops.
+type Metrics interface {
+	// HandleMetrics returns a channel that receives handle metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	HandleMetrics(bufferSize int) <-chan HandleMetricEvent
+	// PanicMetrics returns a channel that receives panic metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	PanicMetrics(bufferSize int) <-chan PanicMetricEvent
+	// DispatchMetrics returns a channel that receives dispatch metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	DispatchMetrics(bufferSize int) <-chan DispatchMetricEvent
+	// LifecycleMetrics returns a channel that receives lifecycle metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	LifecycleMetrics(bufferSize int) <-chan LifecycleMetricEvent
+}
+
 type metricBase struct {
 	Worker string
 	Time   time.Time
@@ -51,8 +69,8 @@ type metricsRecorder struct {
 	lifecycleCh chan LifecycleMetricEvent
 }
 
-func newMetricsRecorder(workerName string) metricsRecorder {
-	return metricsRecorder{workerName: workerName}
+func newMetricsRecorder(workerName string) *metricsRecorder {
+	return &metricsRecorder{workerName: workerName}
 }
 
 // HandleMetrics returns a channel that receives handle metric events. The

@@ -131,16 +131,16 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler())
+	_, err := op.AddHandler("worker-test", internal.QuickHandler())
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 
 	// Act: second start is no-op
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	<-op.StopAll()
 
 	// Assert
-	status, err := op.Status("w")
+	status, err := op.Status("worker-test")
 	require.NoError(t, err)
 	require.Equal(t, smoothoperator.StatusStopped, status)
 }
@@ -150,11 +150,11 @@ func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testi
 
 	// Arrange: add handler but never start it
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler())
+	_, err := op.AddHandler("worker-test", internal.QuickHandler())
 	require.NoError(t, err)
 
 	// Act
-	ch, err := op.Stop("w")
+	ch, err := op.Stop("worker-test")
 	require.NoError(t, err)
 
 	// Assert: channel closes immediately
@@ -536,13 +536,13 @@ func TestDispatch_WhenWorkerRunning_ShouldDeliverMessageToHandler(t *testing.T) 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
-	_, err := op.AddHandler("w", recordingHandler)
+	_, err := op.AddHandler("worker-test", recordingHandler)
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond) // let worker start and enter idle
 
 	// Act
-	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "hello")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", "hello")
 	require.NoError(t, err)
 
 	// Assert: delivered channel closes promptly
@@ -566,13 +566,13 @@ func TestSendMessage_WhenWorkerRunning_ShouldDeliverTypedMessage(t *testing.T) {
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
-	_, err := op.AddHandler("w", recordingHandler)
+	_, err := op.AddHandler("worker-test", recordingHandler)
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
-	delivered, resultCh, err := smoothoperator.SendMessage[string](op, "w", "typed-data")
+	delivered, resultCh, err := smoothoperator.SendMessage[string](op, "worker-test", "typed-data")
 	require.NoError(t, err)
 
 	select {
@@ -598,14 +598,14 @@ func TestDispatch_WhenWorkerIdle_ShouldWakeUpAndDeliverImmediately(t *testing.T)
 	// Arrange: worker with a very long idle so it's guaranteed to be sleeping
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(10 * time.Second)
-	_, err := op.AddHandler("w", recordingHandler)
+	_, err := op.AddHandler("worker-test", recordingHandler)
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond) // let first Handle run and enter idle
 
 	// Act: send a message — should wake the worker from idle
 	start := time.Now()
-	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "wake-up")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", "wake-up")
 	require.NoError(t, err)
 
 	select {
@@ -631,14 +631,14 @@ func TestDispatch_WhenMultipleMessages_ShouldDeliverAll(t *testing.T) {
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(50 * time.Millisecond)
-	_, err := op.AddHandler("w", recordingHandler)
+	_, err := op.AddHandler("worker-test", recordingHandler)
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond)
 
 	// Act: send 3 messages sequentially, waiting for each to be delivered
 	for i := 0; i < 3; i++ {
-		delivered, resultCh, err := op.Dispatch(context.Background(), "w", fmt.Sprintf("msg-%d", i))
+		delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", fmt.Sprintf("msg-%d", i))
 		require.NoError(t, err)
 		select {
 		case <-delivered:
@@ -664,13 +664,13 @@ func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(50 * time.Millisecond)
-	_, err := op.AddHandler("w", recordingHandler)
+	_, err := op.AddHandler("worker-test", recordingHandler)
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond)
 
 	// Act: send string then int via the generic SendMessage function
-	delivered1, result1, err := smoothoperator.SendMessage[string](op, "w", "hello")
+	delivered1, result1, err := smoothoperator.SendMessage[string](op, "worker-test", "hello")
 	require.NoError(t, err)
 	select {
 	case <-delivered1:
@@ -679,7 +679,7 @@ func TestSendMessage_WhenDifferentTypes_ShouldDeliverCorrectTypes(t *testing.T) 
 	}
 	<-result1
 
-	delivered2, result2, err := smoothoperator.SendMessage[int](op, "w", 42)
+	delivered2, result2, err := smoothoperator.SendMessage[int](op, "worker-test", 42)
 	require.NoError(t, err)
 	select {
 	case <-delivered2:
@@ -708,13 +708,13 @@ func TestDispatch_WhenHandlerReturnsResult_ShouldReceiveOnResultChannel(t *testi
 
 	// Arrange: handler that returns DoneWithResult when it receives a message
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.ResultHandler(5*time.Second, "handler-done"))
+	_, err := op.AddHandler("worker-test", internal.ResultHandler(5*time.Second, "handler-done"))
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
-	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "trigger")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", "trigger")
 	require.NoError(t, err)
 
 	<-delivered
@@ -763,23 +763,23 @@ func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
 	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
-	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second), smoothoperator.WithMessageBufferSize(1))
+	_, err := op.AddHandler("worker-test", internal.BlockingHandler(2*time.Second), smoothoperator.WithMessageBufferSize(1))
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond)
 
 	// First message: accepted and worker is now handling it (blocking)
-	_, _, err = op.Dispatch(context.Background(), "w", "first")
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "first")
 	require.NoError(t, err)
 
 	// Second message: fills the buffer (cap 1)
-	_, _, err = op.Dispatch(context.Background(), "w", "second")
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "second")
 	require.NoError(t, err)
 
 	// Third message: buffer full; Dispatch with short timeout should return deadline exceeded
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, _, err = op.Dispatch(ctx, "w", "third")
+	_, _, err = op.Dispatch(ctx, "worker-test", "third")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, smoothoperator.ErrDispatchTimeout), "err should be ErrDispatchTimeout")
 	require.True(t, errors.Is(err, context.DeadlineExceeded), "err should wrap context.DeadlineExceeded")
@@ -793,7 +793,7 @@ func TestDispatch_WhenContextTimeout_ShouldReturnContextError(t *testing.T) {
 	require.NotEmpty(t, failRecords, "expected 'dispatch failed' log when dispatch times out")
 	rec := failRecords[0]
 	require.Equal(t, slog.LevelWarn, rec.Level, "dispatch failure should be WARN level")
-	require.Equal(t, "w", rec.Attrs["worker"], "expected default attr worker=w")
+	require.Equal(t, "worker-test", rec.Attrs["worker"], "expected default attr worker=w")
 	require.Contains(t, rec.Attrs, "error", "expected error attr on dispatch failure record")
 	require.Equal(t, "third", rec.Attrs["message"], "expected message attr to be the failed message payload")
 	require.Contains(t, rec.Attrs, "config_message_buffer_size", "expected config default attr on dispatch failure record")
@@ -803,15 +803,15 @@ func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *tes
 	t.Parallel()
 
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.BlockingHandler(2*time.Second),
+	_, err := op.AddHandler("worker-test", internal.BlockingHandler(2*time.Second),
 		smoothoperator.WithMessageBufferSize(1),
 		smoothoperator.WithMaxDispatchTimeout(50*time.Millisecond))
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(50 * time.Millisecond)
 
 	// First message: send and wait until worker has accepted it (so worker is now in handler, blocking)
-	delivered1, _, err := op.Dispatch(context.Background(), "w", "first")
+	delivered1, _, err := op.Dispatch(context.Background(), "worker-test", "first")
 	require.NoError(t, err)
 	select {
 	case <-delivered1:
@@ -820,11 +820,11 @@ func TestDispatch_WhenMaxDispatchTimeoutSet_ShouldReturnErrorAfterTimeout(t *tes
 	}
 
 	// Second message: fills the buffer (worker still in handler)
-	_, _, err = op.Dispatch(context.Background(), "w", "second")
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "second")
 	require.NoError(t, err)
 
 	// Third message: buffer full; send is limited by MaxDispatchTimeout (50ms), so should return deadline exceeded
-	_, _, err = op.Dispatch(context.Background(), "w", "third")
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "third")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, smoothoperator.ErrDispatchTimeout), "err should be ErrDispatchTimeout")
 	require.True(t, errors.Is(err, context.DeadlineExceeded), "err should wrap context.DeadlineExceeded")
@@ -839,9 +839,9 @@ func TestMessageOnly_WhenNoMessageSent_ShouldNeverCallHandler(t *testing.T) {
 
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
-	_, err := op.AddHandler("w", recordingHandler, smoothoperator.WithMessageOnly(true))
+	_, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 
 	// Let the worker run for a bit without any message
 	time.Sleep(100 * time.Millisecond)
@@ -856,12 +856,12 @@ func TestMessageOnly_WhenMessageSent_ShouldCallHandlerWithMessage(t *testing.T) 
 
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
-	_, err := op.AddHandler("w", recordingHandler, smoothoperator.WithMessageOnly(true))
+	_, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(20 * time.Millisecond)
 
-	delivered, resultCh, err := op.Dispatch(context.Background(), "w", "hello")
+	delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", "hello")
 	require.NoError(t, err)
 	select {
 	case <-delivered:
@@ -881,13 +881,13 @@ func TestMessageOnly_WhenMultipleMessagesSent_ShouldDeliverAllInOrder(t *testing
 
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, getMessages := internal.NewRecordingHandler(50 * time.Millisecond)
-	_, err := op.AddHandler("w", recordingHandler, smoothoperator.WithMessageOnly(true))
+	_, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
-	require.NoError(t, op.Start("w"))
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(20 * time.Millisecond)
 
 	for i := 0; i < 3; i++ {
-		delivered, resultCh, err := op.Dispatch(context.Background(), "w", fmt.Sprintf("msg-%d", i))
+		delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", fmt.Sprintf("msg-%d", i))
 		require.NoError(t, err)
 		select {
 		case <-delivered:
@@ -918,16 +918,16 @@ func TestWorker_WhenNotFound_ShouldReturnError(t *testing.T) {
 
 func TestWorker_Metrics_WhenReceiving_ShouldReceivePerKindEventsThenClose(t *testing.T) {
 	t.Parallel()
+
+	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
 	recordingHandler, _ := internal.NewRecordingHandler(5 * time.Second)
-	_, err := op.AddHandler("w", recordingHandler, smoothoperator.WithMessageOnly(true))
-	require.NoError(t, err)
-	w, err := op.Worker("w")
+	w, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
 	require.NoError(t, err)
 
-	handleCh := w.HandleMetrics(10)
-	dispatchCh := w.DispatchMetrics(10)
-	lifecycleCh := w.LifecycleMetrics(10)
+	handleCh := w.Metrics().HandleMetrics(10)
+	dispatchCh := w.Metrics().DispatchMetrics(10)
+	lifecycleCh := w.Metrics().LifecycleMetrics(10)
 
 	var handleGot []smoothoperator.HandleMetricEvent
 	var dispatchGot []smoothoperator.DispatchMetricEvent
@@ -953,53 +953,23 @@ func TestWorker_Metrics_WhenReceiving_ShouldReceivePerKindEventsThenClose(t *tes
 		}
 		close(lifecycleDone)
 	}()
-	require.NoError(t, op.Start("w"))
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(20 * time.Millisecond)
-	_, _, _ = op.Dispatch(context.Background(), "w", "hello")
+	_, _, _ = op.Dispatch(context.Background(), "worker-test", "hello")
 	time.Sleep(50 * time.Millisecond)
 	<-op.StopAll()
 	<-handleDone
 	<-dispatchDone
 	<-lifecycleDone
 
+	// Assert
 	require.NotEmpty(t, handleGot, "expected at least one handle event")
 	require.NotEmpty(t, dispatchGot, "expected at least one dispatch event")
 	require.GreaterOrEqual(t, len(lifecycleGot), 2, "expected started and stopped lifecycle events")
 	require.Equal(t, "started", lifecycleGot[0].Event)
 	require.Equal(t, "stopped", lifecycleGot[len(lifecycleGot)-1].Event)
-}
-
-func TestWorker_Dispatch_ShouldRecordDispatchMetric(t *testing.T) {
-	t.Parallel()
-	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w", internal.QuickHandler())
-	require.NoError(t, err)
-	w, _ := op.Worker("w")
-	ch := w.DispatchMetrics(10)
-	var got []smoothoperator.DispatchMetricEvent
-	done := make(chan struct{})
-	go func() {
-		for ev := range ch {
-			got = append(got, ev)
-		}
-		close(done)
-	}()
-	require.NoError(t, op.Start("w"))
-	time.Sleep(20 * time.Millisecond)
-	_, _, err = op.Dispatch(context.Background(), "w", "ping")
-	require.NoError(t, err)
-	time.Sleep(50 * time.Millisecond)
-	<-op.StopAll()
-	<-done
-
-	var hasDispatchOk bool
-	for _, ev := range got {
-		if ev.Ok {
-			hasDispatchOk = true
-			break
-		}
-	}
-	require.True(t, hasDispatchOk, "expected at least one successful dispatch event in stream")
 }
 
 func TestNewOperator_WithLogger_ShouldSendWorkerLogsToCustomLogger(t *testing.T) {

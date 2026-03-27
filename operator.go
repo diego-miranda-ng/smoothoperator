@@ -116,7 +116,8 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 		aware.SetDispatcher(op)
 	}
 	op.log.Info("handler added", "worker", name)
-	return w.asWorker(), nil
+
+	return w, nil
 }
 
 func (op *operator) RemoveHandler(name string) error {
@@ -172,7 +173,8 @@ func (op *operator) Worker(name string) (Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return w.asWorker(), nil
+
+	return w, nil
 }
 
 func (op *operator) Start(name string) error {
