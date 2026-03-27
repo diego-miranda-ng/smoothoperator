@@ -10,8 +10,10 @@ import (
 
 const errHandlerMockNotConfigured = "smoothoperator/internal: HandlerMock.Handle not configured"
 const errDispatcherMockNotConfigured = "smoothoperator/internal: DispatcherMock.Dispatch not configured"
-const errWorkerMockMetricsNotConfigured = "smoothoperator/internal: WorkerMock.Metrics not configured"
-const errWorkerMockLastMetricNotConfigured = "smoothoperator/internal: WorkerMock.LastMetric not configured"
+const errWorkerMockHandleMetricsNotConfigured = "smoothoperator/internal: WorkerMock.HandleMetrics not configured"
+const errWorkerMockPanicMetricsNotConfigured = "smoothoperator/internal: WorkerMock.PanicMetrics not configured"
+const errWorkerMockDispatchMetricsNotConfigured = "smoothoperator/internal: WorkerMock.DispatchMetrics not configured"
+const errWorkerMockLifecycleMetricsNotConfigured = "smoothoperator/internal: WorkerMock.LifecycleMetrics not configured"
 
 // HandlerMock implements Handler. It delegates to HandleFunc; if Handle is
 // called and HandleFunc is nil, it panics. Optionally implements
@@ -65,33 +67,45 @@ func (m *DispatcherMock) Dispatch(ctx context.Context, name string, msg any) (<-
 	return m.DispatchFunc(ctx, name, msg)
 }
 
-// WorkerMock implements Worker. It delegates to MetricsFunc and
-// LastMetricFunc; if either method is called with its func nil, it panics.
+// WorkerMock implements Worker. It delegates to per-kind metrics func fields;
+// if a method is called with its func nil, it panics.
 type WorkerMock struct {
-	MetricsFunc    func(bufferSize int) <-chan smoothoperator.MetricEvent
-	LastMetricFunc func() (smoothoperator.MetricEvent, bool)
+	HandleMetricsFunc    func(bufferSize int) <-chan smoothoperator.HandleMetricEvent
+	PanicMetricsFunc     func(bufferSize int) <-chan smoothoperator.PanicMetricEvent
+	DispatchMetricsFunc  func(bufferSize int) <-chan smoothoperator.DispatchMetricEvent
+	LifecycleMetricsFunc func(bufferSize int) <-chan smoothoperator.LifecycleMetricEvent
 }
 
-// NewWorkerMock returns a WorkerMock. Callers must set MetricsFunc and
-// LastMetricFunc before calling Metrics or LastMetric, or those calls will panic.
-func NewWorkerMock(metricsFn func(int) <-chan smoothoperator.MetricEvent, lastMetricFn func() (smoothoperator.MetricEvent, bool)) *WorkerMock {
-	return &WorkerMock{MetricsFunc: metricsFn, LastMetricFunc: lastMetricFn}
-}
-
-// Metrics implements Worker. Panics if MetricsFunc is nil.
-func (m *WorkerMock) Metrics(bufferSize int) <-chan smoothoperator.MetricEvent {
-	if m.MetricsFunc == nil {
-		panic(errWorkerMockMetricsNotConfigured)
+// HandleMetrics implements Worker. Panics if HandleMetricsFunc is nil.
+func (m *WorkerMock) HandleMetrics(bufferSize int) <-chan smoothoperator.HandleMetricEvent {
+	if m.HandleMetricsFunc == nil {
+		panic(errWorkerMockHandleMetricsNotConfigured)
 	}
-	return m.MetricsFunc(bufferSize)
+	return m.HandleMetricsFunc(bufferSize)
 }
 
-// LastMetric implements Worker. Panics if LastMetricFunc is nil.
-func (m *WorkerMock) LastMetric() (smoothoperator.MetricEvent, bool) {
-	if m.LastMetricFunc == nil {
-		panic(errWorkerMockLastMetricNotConfigured)
+// PanicMetrics implements Worker. Panics if PanicMetricsFunc is nil.
+func (m *WorkerMock) PanicMetrics(bufferSize int) <-chan smoothoperator.PanicMetricEvent {
+	if m.PanicMetricsFunc == nil {
+		panic(errWorkerMockPanicMetricsNotConfigured)
 	}
-	return m.LastMetricFunc()
+	return m.PanicMetricsFunc(bufferSize)
+}
+
+// DispatchMetrics implements Worker. Panics if DispatchMetricsFunc is nil.
+func (m *WorkerMock) DispatchMetrics(bufferSize int) <-chan smoothoperator.DispatchMetricEvent {
+	if m.DispatchMetricsFunc == nil {
+		panic(errWorkerMockDispatchMetricsNotConfigured)
+	}
+	return m.DispatchMetricsFunc(bufferSize)
+}
+
+// LifecycleMetrics implements Worker. Panics if LifecycleMetricsFunc is nil.
+func (m *WorkerMock) LifecycleMetrics(bufferSize int) <-chan smoothoperator.LifecycleMetricEvent {
+	if m.LifecycleMetricsFunc == nil {
+		panic(errWorkerMockLifecycleMetricsNotConfigured)
+	}
+	return m.LifecycleMetricsFunc(bufferSize)
 }
 
 // NewRecordingHandler returns a Handler (using HandlerMock) that records non-nil

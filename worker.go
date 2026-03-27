@@ -19,17 +19,21 @@ const (
 )
 
 // Worker is the metrics view of a worker. Obtain it from Operator.AddHandler or
-// Operator.Worker(name). Metrics are only collected after Metrics() or LastMetric()
-// is used; the channel is created lazily on first Metrics() call.
+// Operator.Worker(name). Each metric kind has its own channel, created lazily on
+// first call. Channels are closed when the worker stops.
 type Worker interface {
-	// Metrics returns a channel that receives metric events for this worker.
-	// The channel is created on first call with the given bufferSize and closed when the worker stops.
-	// Receive in a dedicated goroutine to avoid blocking the worker.
-	// bufferSize is the capacity of the channel buffer; use 0 for an unbuffered channel.
-	Metrics(bufferSize int) <-chan MetricEvent
-	// LastMetric returns the most recent metric event and true, or a zero value and false
-	// if no event has been recorded yet.
-	LastMetric() (MetricEvent, bool)
+	// HandleMetrics returns a channel that receives handle metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	HandleMetrics(bufferSize int) <-chan HandleMetricEvent
+	// PanicMetrics returns a channel that receives panic metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	PanicMetrics(bufferSize int) <-chan PanicMetricEvent
+	// DispatchMetrics returns a channel that receives dispatch metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	DispatchMetrics(bufferSize int) <-chan DispatchMetricEvent
+	// LifecycleMetrics returns a channel that receives lifecycle metric events.
+	// Created on first call with the given bufferSize; closed when the worker stops.
+	LifecycleMetrics(bufferSize int) <-chan LifecycleMetricEvent
 }
 
 // worker wraps a Handler and manages its state, status, and lifecycle. It runs
@@ -106,7 +110,7 @@ func (w *worker) start(ctx context.Context) error {
 		defer w.setStatus(StatusStopped)
 		defer w.emitStoppedAndCloseMetrics()
 
-		w.metrics.Record(w.metrics.lifecycleEvent("started"))
+		w.metrics.RecordLifecycle(w.metrics.lifecycleEvent("started"))
 
 		if w.config.messageOnly {
 			w.runMessageOnly(workerCtx)
@@ -171,7 +175,7 @@ func (w *worker) runHandle(ctx context.Context, raw envelope, hadMessage bool) H
 
 	w.sendResultToEnvelope(raw, result)
 
-	w.metrics.Record(w.metrics.handleEvent(result, elapsed, hadMessage))
+	w.metrics.RecordHandle(w.metrics.handleEvent(result, elapsed, hadMessage))
 	w.log.Debug("handle completed", "status", result.Status, "had_message", hadMessage, "duration", elapsed)
 
 	return result
@@ -264,7 +268,7 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 
 	err := w.panicToError(v)
 	w.panicCount++
-	w.metrics.Record(w.metrics.panicEvent(w.panicCount, err))
+	w.metrics.RecordPanic(w.metrics.panicEvent(w.panicCount, err))
 	w.log.Warn("panic recovered", "attempt", w.panicCount, "max_attempts", w.config.maxPanicAttempts, "error", err)
 
 	if w.config.maxPanicAttempts > 0 && w.panicCount >= w.config.maxPanicAttempts {
@@ -295,8 +299,8 @@ func (w *worker) panicToError(v interface{}) error {
 // Called from the worker goroutine when the run loop exits.
 func (w *worker) emitStoppedAndCloseMetrics() {
 	w.log.Info("worker stopped")
-	w.metrics.Record(w.metrics.lifecycleEvent("stopped"))
-	w.metrics.CloseChannel()
+	w.metrics.RecordLifecycle(w.metrics.lifecycleEvent("stopped"))
+	w.metrics.CloseChannels()
 }
 
 func (w *worker) getName() string {
@@ -341,11 +345,11 @@ func (w *worker) sendEnvelope(ctx context.Context, env envelope) bool {
 	select {
 	case w.msgCh <- env:
 		w.log.Debug("message dispatched", "message", env.msg)
-		w.metrics.Record(w.metrics.dispatchEvent(true, nil))
+		w.metrics.RecordDispatch(w.metrics.dispatchEvent(true, nil))
 		return true
 	case <-ctx.Done():
 		w.log.Warn("dispatch failed: context done", "error", ctx.Err(), "message", env.msg)
-		w.metrics.Record(w.metrics.dispatchEvent(false, ctx.Err()))
+		w.metrics.RecordDispatch(w.metrics.dispatchEvent(false, ctx.Err()))
 		return false
 	}
 }
