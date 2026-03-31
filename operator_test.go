@@ -96,18 +96,26 @@ func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
 
 	// Arrange
 	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("w1", internal.QuickHandler())
+	_, err := op.AddHandler("worker-1", internal.QuickHandler())
 	require.NoError(t, err)
-	_, err = op.AddHandler("w2", internal.QuickHandler())
+	_, err = op.AddHandler("worker-2", internal.QuickHandler())
 	require.NoError(t, err)
 
 	// Act
 	require.NoError(t, op.StartAll())
 	time.Sleep(20 * time.Millisecond)
-	<-op.StopAll()
 
-	// Assert
-	// (implicit: StopAll completes without hanging)
+	// Assert worker-1
+	status, err := op.Status("worker-1")
+	require.NoError(t, err)
+	require.Equal(t, smoothoperator.StatusRunning, status)
+
+	// Assert worker-1
+	status, err = op.Status("worker-2")
+	require.NoError(t, err)
+	require.Equal(t, smoothoperator.StatusRunning, status)
+
+	<-op.StopAll()
 }
 
 func TestStop_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
