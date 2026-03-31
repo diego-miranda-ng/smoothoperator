@@ -9,6 +9,9 @@ import (
 	"sync"
 )
 
+// Dispatcher sends messages to named workers. The Operator implements this
+// interface; handlers that implement DispatcherAware receive it at registration
+// time so they can forward messages to other workers.
 type Dispatcher interface {
 	// Dispatch sends a message to the worker with the given name. If the worker is
 	// idle, it wakes up immediately. The message is passed to Handle via the msg
@@ -101,6 +104,10 @@ func NewOperator(ctx context.Context, opts ...Option) Operator {
 	return o
 }
 
+// AddHandler registers a handler under name with the given options. The worker
+// is created in StatusStopped; call Start or StartAll to run it. If the handler
+// implements DispatcherAware, SetDispatcher is called with the operator before
+// returning. Returns ErrWorkerAlreadyExists if name is already registered.
 func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOption) (Worker, error) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
@@ -120,6 +127,9 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 	return w, nil
 }
 
+// RemoveHandler unregisters the named worker, stopping it first if running and
+// waiting for the goroutine to exit. After removal, the name can be reused with
+// AddHandler. Returns ErrWorkerNotFound if name is not registered.
 func (op *operator) RemoveHandler(name string) error {
 	op.mu.Lock()
 	w, err := op.getWorkerLocked(name)
@@ -136,6 +146,11 @@ func (op *operator) RemoveHandler(name string) error {
 	return nil
 }
 
+// Dispatch sends msg to the named worker's message channel. If the worker has a
+// WithMaxDispatchTimeout configured, a derived context with that timeout bounds
+// the send. Returns a delivered channel (closed when the handler dequeues the
+// message), a result channel (receives HandleResult.Result then closes), and an
+// error (ErrWorkerNotFound or ErrDispatchTimeout joined with the context error).
 func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan struct{}, <-chan any, error) {
 	w, err := op.getWorker(name)
 	if err != nil {
@@ -160,6 +175,8 @@ func (op *operator) Dispatch(ctx context.Context, name string, msg any) (<-chan 
 	return nil, nil, op.errorHandler(errors.Join(ErrDispatchTimeout, fmt.Errorf("dispatch timeout: %w", sendCtx.Err())))
 }
 
+// Status returns the current lifecycle state of the named worker (StatusRunning
+// or StatusStopped). Returns ErrWorkerNotFound if name is not registered.
 func (op *operator) Status(name string) (Status, error) {
 	w, err := op.getWorker(name)
 	if err != nil {
@@ -168,6 +185,9 @@ func (op *operator) Status(name string) (Status, error) {
 	return w.getStatus(), nil
 }
 
+// Worker returns the Worker interface for the named worker, providing access to
+// Name, Status, and streaming Metrics channels. Returns ErrWorkerNotFound if
+// name is not registered.
 func (op *operator) Worker(name string) (Worker, error) {
 	w, err := op.getWorker(name)
 	if err != nil {
@@ -177,6 +197,9 @@ func (op *operator) Worker(name string) (Worker, error) {
 	return w, nil
 }
 
+// Start launches the named worker's goroutine. If the worker is already running,
+// this is a no-op and returns nil. Returns ErrWorkerNotFound if name is not
+// registered.
 func (op *operator) Start(name string) error {
 	w, err := op.getWorker(name)
 	if err != nil {
@@ -190,6 +213,9 @@ func (op *operator) Start(name string) error {
 	return nil
 }
 
+// StartAll iterates over every registered worker and calls Start. If any Start
+// returns an error, it is returned immediately and remaining workers are not
+// started.
 func (op *operator) StartAll() error {
 	op.mu.RLock()
 	names := make([]string, 0, len(op.workers))
@@ -206,6 +232,9 @@ func (op *operator) StartAll() error {
 	return nil
 }
 
+// Stop cancels the named worker's context and returns a channel that closes when
+// the goroutine has fully exited. Returns ErrWorkerNotFound if name is not
+// registered. Block on the returned channel to wait for a clean shutdown.
 func (op *operator) Stop(name string) (chan struct{}, error) {
 	w, err := op.getWorker(name)
 	if err != nil {
@@ -217,6 +246,8 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 	return ch, nil
 }
 
+// StopAll stops every registered worker and waits for each goroutine to exit
+// sequentially. Returns a closed channel once all workers have stopped.
 func (op *operator) StopAll() chan struct{} {
 	op.mu.RLock()
 	names := make([]string, 0, len(op.workers))

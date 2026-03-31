@@ -18,9 +18,16 @@ const (
 	StatusStopped Status = "stopped"
 )
 
+// Worker is the read-only view of a registered worker. Obtain it from
+// Operator.AddHandler or Operator.Worker. The concrete type is unexported;
+// all interaction goes through this interface.
 type Worker interface {
+	// Name returns the unique name the worker was registered with.
 	Name() string
+	// Status returns the current lifecycle state (StatusRunning or StatusStopped).
 	Status() Status
+	// Metrics returns the Metrics interface for subscribing to per-kind metric
+	// event channels (handle, panic, dispatch, lifecycle).
 	Metrics() Metrics
 }
 
@@ -60,10 +67,12 @@ func newWorker(name string, handler Handler, cfg config, logger *slog.Logger) *w
 	return w
 }
 
+// Name returns the unique name the worker was registered with.
 func (w *worker) Name() string {
 	return w.name
 }
 
+// Status returns the current lifecycle state. Safe for concurrent use.
 func (w *worker) Status() Status {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -71,6 +80,8 @@ func (w *worker) Status() Status {
 	return w.status
 }
 
+// Metrics returns the metricsRecorder for this worker, which implements the
+// Metrics interface. Safe for concurrent use.
 func (w *worker) Metrics() Metrics {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -200,6 +211,10 @@ func (w *worker) processEnvelope(ctx context.Context, raw envelope) HandleResult
 	return result
 }
 
+// handle runs one iteration of the polling-mode loop. It checks for a pending
+// message (non-blocking), calls the handler, and idles if the result is None or
+// Fail with a positive IdleDuration. During idle the worker can be woken early
+// by a new message or context cancellation. Caller must not hold w.mu.
 func (w *worker) handle(ctx context.Context) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -309,6 +324,8 @@ func (w *worker) emitStoppedAndCloseMetrics() {
 	w.metrics.CloseChannels()
 }
 
+// getName returns the worker's registered name. The name is immutable after
+// construction so no lock is needed.
 func (w *worker) getName() string {
 	return w.name
 }
@@ -320,6 +337,7 @@ func (w *worker) getStatus() Status {
 	return w.status
 }
 
+// setStatus updates the worker's lifecycle state under the mutex.
 func (w *worker) setStatus(s Status) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

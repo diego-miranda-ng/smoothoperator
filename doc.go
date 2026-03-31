@@ -6,7 +6,7 @@
 // The package exposes:
 //   - Operator: register handlers by name, start/stop workers by name, query status by name.
 //   - Handler: interface with Handle(ctx, msg) returning HandleResult (None/Done/DoneWithResult/Fail).
-//   - HandleResult constructors: None, Done, Fail for building handler responses.
+//   - HandleResult constructors: None, Done, DoneWithResult, Fail for building handler responses.
 //   - HandlerOption: optional settings per worker (e.g. WithMaxPanicAttempts, WithMessageOnly).
 //   - Status: worker state (StatusRunning, StatusStopped).
 //
