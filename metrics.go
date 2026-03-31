@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
-// Worker is the metrics view of a worker. Obtain it from Operator.AddHandler or
-// Operator.Worker(name). Each metric kind has its own channel, created lazily on
-// first call. Channels are closed when the worker stops.
+// Metrics provides per-worker streaming metric channels. Obtain it via
+// Worker.Metrics(). Each metric kind (handle, panic, dispatch, lifecycle) has
+// its own typed channel, created lazily on the first call with the given buffer
+// size. Channels are closed when the worker stops. Sends are non-blocking; if
+// the buffer is full the event is dropped.
 type Metrics interface {
 	// HandleMetrics returns a channel that receives handle metric events.
 	// Created on first call with the given bufferSize; closed when the worker stops.
@@ -23,6 +25,8 @@ type Metrics interface {
 	LifecycleMetrics(bufferSize int) <-chan LifecycleMetricEvent
 }
 
+// metricBase carries the worker name and timestamp common to every metric event.
+// It is embedded by all concrete event types so its fields are promoted.
 type metricBase struct {
 	Worker string
 	Time   time.Time
@@ -69,6 +73,9 @@ type metricsRecorder struct {
 	lifecycleCh chan LifecycleMetricEvent
 }
 
+// newMetricsRecorder creates a recorder for the named worker. All channels
+// start as nil and are allocated lazily when a caller subscribes via one of the
+// Metrics interface methods.
 func newMetricsRecorder(workerName string) *metricsRecorder {
 	return &metricsRecorder{workerName: workerName}
 }
@@ -201,6 +208,8 @@ func (m *metricsRecorder) CloseChannels() {
 	}
 }
 
+// handleEvent builds a HandleMetricEvent from the given Handle result, elapsed
+// duration, and whether a message was present.
 func (m *metricsRecorder) handleEvent(result HandleResult, duration time.Duration, hadMessage bool) HandleMetricEvent {
 	ev := HandleMetricEvent{
 		metricBase: metricBase{Worker: m.workerName, Time: time.Now()},
@@ -214,6 +223,8 @@ func (m *metricsRecorder) handleEvent(result HandleResult, duration time.Duratio
 	return ev
 }
 
+// lifecycleEvent builds a LifecycleMetricEvent with the given event name
+// (e.g. "started" or "stopped").
 func (m *metricsRecorder) lifecycleEvent(event string) LifecycleMetricEvent {
 	return LifecycleMetricEvent{
 		metricBase: metricBase{Worker: m.workerName, Time: time.Now()},
@@ -221,6 +232,8 @@ func (m *metricsRecorder) lifecycleEvent(event string) LifecycleMetricEvent {
 	}
 }
 
+// panicEvent builds a PanicMetricEvent with the cumulative attempt count and
+// the recovered panic converted to an error.
 func (m *metricsRecorder) panicEvent(attempt int, err error) PanicMetricEvent {
 	return PanicMetricEvent{
 		metricBase: metricBase{Worker: m.workerName, Time: time.Now()},
@@ -229,6 +242,8 @@ func (m *metricsRecorder) panicEvent(attempt int, err error) PanicMetricEvent {
 	}
 }
 
+// dispatchEvent builds a DispatchMetricEvent indicating whether the dispatch
+// succeeded and, on failure, the associated error.
 func (m *metricsRecorder) dispatchEvent(ok bool, dispatchErr error) DispatchMetricEvent {
 	ev := DispatchMetricEvent{
 		metricBase: metricBase{Worker: m.workerName, Time: time.Now()},
