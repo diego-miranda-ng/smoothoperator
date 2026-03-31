@@ -5,7 +5,7 @@
 //
 // The package exposes:
 //   - Operator: register handlers by name, start/stop workers by name, query status by name.
-//   - Handler: interface with Handle(ctx) returning HandleResult (None/Done/Fail).
+//   - Handler: interface with Handle(ctx, msg) returning HandleResult (None/Done/DoneWithResult/Fail).
 //   - HandleResult constructors: None, Done, Fail for building handler responses.
 //   - HandlerOption: optional settings per worker (e.g. WithMaxPanicAttempts, WithMessageOnly).
 //   - Status: worker state (StatusRunning, StatusStopped).
@@ -19,13 +19,14 @@
 //	ctx := context.Background()
 //	op := smoothoperator.NewOperator(ctx)
 //	// Or with a custom logger: op := smoothoperator.NewOperator(ctx, smoothoperator.WithLogger(myLogger))
-//	_, err := op.AddHandler("my-worker", myHandler)
+//	_, err := op.AddHandler("my-worker", myHandler, smoothoperator.WithMessageOnly(true))
 //	if err != nil { ... }
 //	op.Start("my-worker")
+//	smoothoperator.SendMessage(op, "my-worker", "hello")
 //	// ... later ...
-//	<-op.Stop("my-worker")  // wait for stop
+//	ch, _ := op.Stop("my-worker")
+//	<-ch // wait for stop
 //	// or stop all: <-op.StopAll()
-//	status, _ := op.Status("my-worker")
 //
 // Workers run in a loop: Handle is called; if the result is None or Fail with IdleDuration,
 // the worker sleeps for that duration before the next Handle call. If Handle panics, the

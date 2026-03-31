@@ -1,71 +1,110 @@
 # smoothoperator
 
-A small Go library to run multiple named workers (goroutines) with a shared context. Each worker runs a `Handler` in a loop until the context is cancelled; handlers can report "no work" and sleep for a configurable duration to avoid busy-looping.
+A Go library for running multiple named workers (goroutines) managed by a central operator. Register handlers by name, start and stop them individually or all at once, send typed messages between workers, and observe execution via streaming metrics channels. Each worker runs a `Handler` in a loop (or on-demand when messages arrive) with built-in panic recovery, configurable idle backoff, and structured logging.
 
 ## Install
-
-Use the library in your module:
 
 ```bash
 go get github.com/diego-miranda-ng/smoothoperator
 ```
 
-## Usage
+Requires Go 1.25+.
+
+## Quick start
 
 ```go
 package main
 
 import (
-    "context"
-    "github.com/diego-miranda-ng/smoothoperator"
+	"context"
+	"fmt"
+	"time"
+
+	so "github.com/diego-miranda-ng/smoothoperator"
 )
 
-func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+type printer struct{}
 
-    op := smoothoperator.NewOperator(ctx)
-    // Optional: op := smoothoperator.NewOperator(ctx, smoothoperator.WithLogger(myLogger))
-
-    _, _ = op.AddHandler("my-worker", myHandler{}, smoothoperator.Config{})
-    op.StartAll()
-
-    // ... run until shutdown ...
-    cancel()
-    <-op.StopAll()
+func (printer) Handle(ctx context.Context, msg any) so.HandleResult {
+	if msg == nil {
+		return so.None(1 * time.Second)
+	}
+	m := msg.(so.Message[string])
+	fmt.Println("received:", m.Data)
+	return so.Done()
 }
 
-type myHandler struct{}
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-func (myHandler) Handle(ctx context.Context) smoothoperator.HandleResult {
-    // Do work; return smoothoperator.Done(), smoothoperator.None(idle), or smoothoperator.Fail(err, idle).
-    return smoothoperator.Done()
+	op := so.NewOperator(ctx)
+
+	_, _ = op.AddHandler("printer", printer{}, so.WithMessageOnly(true))
+	_ = op.StartAll()
+
+	so.SendMessage(op, "printer", "hello world")
+
+	time.Sleep(100 * time.Millisecond)
+	<-op.StopAll()
 }
 ```
 
-- **`Handler`** implements `Handle(ctx) HandleResult`. Return `Done()`, `None(idleDuration)`, or `Fail(err, idleDuration)`.
-- **`NewOperator(ctx)`** or **`NewOperator(ctx, smoothoperator.WithLogger(logger))`** creates an operator. Without options, a default JSON logger writing to `os.Stdout` is used; with `WithLogger` you can plug your own logger (logs form a tree: operator → each worker with a `"worker"` attribute). Use `AddHandler(name, handler, config)` (returns `Worker, error`), then `Start(name)` or `StartAll()`, and `Stop(name)` / `StopAll()` for shutdown. Use `Status(name)` to get a worker’s status. Pass `Config{}` for defaults, or set `Config{MaxPanicAttempts: n}` to stop a worker after n panic recoveries.
+## Features
+
+- **Named workers** -- register, start, stop, and remove workers by name.
+- **Polling and message-only modes** -- workers can run in a continuous loop or activate only when a message arrives.
+- **Typed messages** -- send `Message[T]` to workers with `SendMessage` / `SendMessageWithContext` for type-safe payloads.
+- **Dispatch with results** -- `Dispatch` returns channels for delivery confirmation and handler results.
+- **Cross-worker communication** -- handlers implementing `DispatcherAware` receive a `Dispatcher` to send messages to other workers.
+- **Panic recovery** -- workers recover from panics, log them, back off, and continue. Configurable max attempts.
+- **Streaming metrics** -- per-worker channels for handle, panic, dispatch, and lifecycle events.
+- **Structured logging** -- uses `log/slog` with per-worker child loggers. Bring your own logger with `WithLogger`.
+
+## Handler results
+
+| Constructor | When to use | Worker behavior |
+|---|---|---|
+| `None(idle)` | No work available | Sleeps for `idle`, then calls `Handle` again |
+| `Done()` | Work completed | Calls `Handle` again immediately |
+| `DoneWithResult(v)` | Work completed, return value to dispatcher | Same as `Done`, plus sends `v` on the result channel |
+| `Fail(err, idle)` | Handler error | Logs `err`, sleeps for `idle`, then retries |
+
+## Configuration
+
+Options passed to `AddHandler` to configure per-worker behavior:
+
+| Option | Default | Description |
+|---|---|---|
+| `WithMessageOnly(true)` | `false` | Only call `Handle` when a message arrives (skip polling loop) |
+| `WithMessageBufferSize(n)` | `1` | Capacity of the incoming message channel |
+| `WithMaxDispatchTimeout(d)` | `0` (no limit) | Max time `Dispatch` waits to send a message to this worker |
+| `WithMaxPanicAttempts(n)` | `0` (unlimited) | Stop the worker after `n` panic recoveries |
+| `WithPanicBackoff(d)` | `1s` | Sleep duration after a panic before retrying |
 
 ## Documentation
 
-For a full reference of all types and methods, see **[DOCUMENTATION.md](DOCUMENTATION.md)**. You can also use the standard godoc from the package directory:
+For the full API reference, all types, and detailed copy-paste examples see **[DOCUMENTATION.md](DOCUMENTATION.md)**.
+
+You can also browse with `go doc`:
 
 ```bash
 go doc github.com/diego-miranda-ng/smoothoperator
 go doc github.com/diego-miranda-ng/smoothoperator.Operator
+go doc github.com/diego-miranda-ng/smoothoperator.Handler
 ```
 
 ## Project structure
 
-- **Root package** – public API: `Operator`, `Worker`, `Handler`, `HandleResult`, `NewOperator`, etc.
-- **internal** – test helpers and mocks (not part of the public API).
+- **Root package** -- public API: `Operator`, `Dispatcher`, `Worker`, `Handler`, `HandleResult`, `Message[T]`, `Metrics`, metric event types, sentinel errors.
+- **internal/** -- test helpers and mocks (not part of the public API).
 
 ## Development
 
 ### Prerequisites
 
-- [Docker](https://www.docker.com/get-started) (optional, for dev container)
 - [Go](https://go.dev/dl/) 1.25+
+- [Docker](https://www.docker.com/get-started) (optional, for dev container)
 
 ### Commands
 
@@ -74,4 +113,4 @@ go build ./...
 go test ./...
 ```
 
-This project can use Docker and VS Code Dev Containers for a consistent environment; see [.devcontainer](.devcontainer) and [.vscode](.vscode).
+This project supports Docker and VS Code Dev Containers for a consistent environment; see [.devcontainer](.devcontainer) and [.vscode](.vscode).
