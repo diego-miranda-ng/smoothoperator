@@ -1024,3 +1024,143 @@ func TestNewOperator_WithLogger_ShouldSendWorkerLogsToCustomLogger(t *testing.T)
 	}
 	require.GreaterOrEqual(t, workerRecordCount, 3, "expected at least 3 worker-emitted records with config attrs (start, handle error, stop)")
 }
+
+// --- UpdateHandlerOptions tests ---
+
+func TestUpdateHandlerOptions_WhenWorkerRunning_ShouldStopUpdateAndRestart(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("worker-test", internal.QuickHandler())
+	require.NoError(t, err)
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(20 * time.Millisecond)
+
+	status, err := op.Status("worker-test")
+	require.NoError(t, err)
+	require.Equal(t, smoothoperator.StatusRunning, status)
+
+	// Act
+	err = op.UpdateHandlerOptions("worker-test", smoothoperator.WithLockOSThread(true))
+	require.NoError(t, err)
+	time.Sleep(20 * time.Millisecond)
+
+	// Assert: worker is running again after update
+	status, err = op.Status("worker-test")
+	require.NoError(t, err)
+	require.Equal(t, smoothoperator.StatusRunning, status)
+
+	<-op.StopAll()
+}
+
+func TestUpdateHandlerOptions_WhenWorkerStopped_ShouldUpdateConfigOnly(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("worker-test", internal.QuickHandler())
+	require.NoError(t, err)
+
+	// Act
+	err = op.UpdateHandlerOptions("worker-test", smoothoperator.WithLockOSThread(true))
+	require.NoError(t, err)
+
+	// Assert: worker remains stopped
+	status, err := op.Status("worker-test")
+	require.NoError(t, err)
+	require.Equal(t, smoothoperator.StatusStopped, status)
+}
+
+func TestUpdateHandlerOptions_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+
+	// Act
+	err := op.UpdateHandlerOptions("missing", smoothoperator.WithLockOSThread(true))
+
+	// Assert
+	require.Error(t, err)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound))
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestUpdateHandlerOptions_WhenLockOSThreadEnabled_ShouldRunCorrectly(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
+	_, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
+	require.NoError(t, err)
+
+	// Act: enable lockOSThread via update, then start and dispatch
+	err = op.UpdateHandlerOptions("worker-test", smoothoperator.WithLockOSThread(true))
+	require.NoError(t, err)
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(20 * time.Millisecond)
+
+	delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", "hello-locked")
+	require.NoError(t, err)
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message not delivered")
+	}
+	<-resultCh
+
+	<-op.StopAll()
+
+	// Assert
+	msgs := getMessages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "hello-locked", msgs[0])
+}
+
+func TestUpdateHandlerOptions_WhenMultipleOptionsChanged_ShouldApplyAll(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	capture := newCaptureHandler()
+	logger := slog.New(capture)
+	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
+	recordingHandler, getMessages := internal.NewRecordingHandler(5 * time.Second)
+	_, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
+	require.NoError(t, err)
+
+	// Act: update multiple options at once
+	err = op.UpdateHandlerOptions("worker-test",
+		smoothoperator.WithLockOSThread(true),
+		smoothoperator.WithMessageBufferSize(5),
+		smoothoperator.WithMaxPanicAttempts(10),
+	)
+	require.NoError(t, err)
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(20 * time.Millisecond)
+
+	delivered, resultCh, err := op.Dispatch(context.Background(), "worker-test", "multi-opt")
+	require.NoError(t, err)
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message not delivered")
+	}
+	<-resultCh
+
+	<-op.StopAll()
+
+	// Assert: message was delivered
+	msgs := getMessages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, "multi-opt", msgs[0])
+
+	// Assert: updated config attrs appear in logs
+	workerRecords := capture.findByMessage("starting worker")
+	require.NotEmpty(t, workerRecords, "expected 'starting worker' log")
+	rec := workerRecords[0]
+	require.Equal(t, "true", rec.Attrs["config_lock_os_thread"], "expected config_lock_os_thread=true")
+	require.Equal(t, "5", rec.Attrs["config_message_buffer_size"], "expected config_message_buffer_size=5")
+	require.Equal(t, "10", rec.Attrs["config_max_panic_attempts"], "expected config_max_panic_attempts=10")
+}

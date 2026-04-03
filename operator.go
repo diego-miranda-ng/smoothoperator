@@ -54,6 +54,11 @@ type Operator interface {
 	// Worker returns the Worker interface for the given name, for per-kind metrics channels.
 	// Returns error if name not found.
 	Worker(name string) (Worker, error)
+	// UpdateHandlerOptions applies the given options on top of the worker's current
+	// configuration. If the worker is running it is stopped first, the config is
+	// updated, and the worker is restarted. If the worker is stopped it stays
+	// stopped after the update. Returns ErrWorkerNotFound if name is not registered.
+	UpdateHandlerOptions(name string, opts ...HandlerOption) error
 }
 
 // defaultLogger is the logger used when no WithLogger option is provided. It
@@ -116,7 +121,7 @@ func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOpti
 		return nil, op.errorHandler(fmt.Errorf("worker %s already exists: %w", name, ErrWorkerAlreadyExists))
 	}
 
-	cfg := applyHandlerOptions(opts...)
+	cfg := applyHandlerOptions(config{}, opts...)
 	w := newWorker(name, handler, cfg, op.log)
 	op.workers[name] = w
 	if aware, ok := handler.(DispatcherAware); ok {
@@ -143,6 +148,33 @@ func (op *operator) RemoveHandler(name string) error {
 	op.log.Info("handler removed", "worker", name)
 	// Stop the worker (if running) and wait for it to finish.
 	<-w.stop()
+	return nil
+}
+
+// UpdateHandlerOptions applies opts on top of the named worker's current config.
+// If the worker is running it is stopped, reconfigured, and restarted. If the
+// worker is stopped it remains stopped after the config change. Returns
+// ErrWorkerNotFound if name is not registered.
+func (op *operator) UpdateHandlerOptions(name string, opts ...HandlerOption) error {
+	w, err := op.getWorker(name)
+	if err != nil {
+		return err
+	}
+
+	wasRunning := w.getStatus() == StatusRunning
+	if wasRunning {
+		<-w.stop()
+	}
+
+	cfg := applyHandlerOptions(w.config, opts...)
+	w.applyConfig(cfg, op.log)
+	op.log.Info("handler options updated", "worker", name)
+
+	if wasRunning {
+		if err := w.start(op.ctx); err != nil {
+			return op.errorHandler(err)
+		}
+	}
 	return nil
 }
 

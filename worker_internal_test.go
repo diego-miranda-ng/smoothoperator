@@ -36,7 +36,7 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 			return Done()
 		}
 	}}
-	w := newWorker("w", quickHandle, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", quickHandle, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 	ctx := context.Background()
 
 	// Act
@@ -52,7 +52,7 @@ func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testi
 	t.Parallel()
 	// Arrange
 	quickHandle := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult { return Done() }}
-	w := newWorker("w", quickHandle, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", quickHandle, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 
 	// Act
 	ch := w.stop()
@@ -67,7 +67,7 @@ func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	h := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult { return Done() }}
-	w := newWorker("my-name", h, applyHandlerOptions(), slog.Default().With("worker", "my-name"))
+	w := newWorker("my-name", h, applyHandlerOptions(config{}), slog.Default().With("worker", "my-name"))
 
 	// Act
 	name := w.getName()
@@ -90,7 +90,7 @@ func TestWorker_WhenHandleReturnsNone_ShouldSleepForIdleDuration(t *testing.T) {
 			return None(idleDur)
 		}
 	}}
-	w := newWorker("idle", h, applyHandlerOptions(), slog.Default().With("worker", "idle"))
+	w := newWorker("idle", h, applyHandlerOptions(config{}), slog.Default().With("worker", "idle"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -113,7 +113,7 @@ func TestWorkerStop_WhenIdleSleep_ShouldCancelContextAndExitSelect(t *testing.T)
 			return None(5 * time.Second)
 		}
 	}}
-	w := newWorker("idle", h, applyHandlerOptions(), slog.Default().With("worker", "idle"))
+	w := newWorker("idle", h, applyHandlerOptions(config{}), slog.Default().With("worker", "idle"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -136,7 +136,7 @@ func TestWorker_WhenHandleReturnsNoneWithZeroDuration_ShouldNotSleep(t *testing.
 			return None(0)
 		}
 	}}
-	w := newWorker("idle", h, applyHandlerOptions(), slog.Default().With("worker", "idle"))
+	w := newWorker("idle", h, applyHandlerOptions(config{}), slog.Default().With("worker", "idle"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(30 * time.Millisecond)
@@ -161,7 +161,7 @@ func TestWorker_WhenHandleReturnsFail_ShouldLogErrorAndCanSleep(t *testing.T) {
 			return Fail(handlerErr, idleDur)
 		}
 	}}
-	w := newWorker("fail", h, applyHandlerOptions(), slog.Default().With("worker", "fail"))
+	w := newWorker("fail", h, applyHandlerOptions(config{}), slog.Default().With("worker", "fail"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -177,7 +177,7 @@ func TestWorker_WhenHandlePanics_ShouldRecoverAndContinueUntilStop(t *testing.T)
 	t.Parallel()
 	// Arrange
 	h := handlerFunc{fn: func(context.Context, any) HandleResult { panic("test panic") }}
-	w := newWorker("panic-worker", h, applyHandlerOptions(), slog.Default().With("worker", "panic-worker"))
+	w := newWorker("panic-worker", h, applyHandlerOptions(config{}), slog.Default().With("worker", "panic-worker"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	require.NoError(t, w.start(ctx))
@@ -200,7 +200,7 @@ func TestWorker_WhenHandlePanicsWithErrorValue_ShouldRecoverAndLogError(t *testi
 	// Arrange: panic with error value to cover panicToError's error branch
 	panicErr := fmt.Errorf("handler panic error")
 	h := handlerFunc{fn: func(context.Context, any) HandleResult { panic(panicErr) }}
-	w := newWorker("panic-err", h, applyHandlerOptions(), slog.Default().With("worker", "panic-err"))
+	w := newWorker("panic-err", h, applyHandlerOptions(config{}), slog.Default().With("worker", "panic-err"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -216,7 +216,7 @@ func TestWorker_WhenMaxPanicAttemptsReached_ShouldStop(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	h := handlerFunc{fn: func(context.Context, any) HandleResult { panic("test panic") }}
-	w := newWorker("panic-worker", h, applyHandlerOptions(WithMaxPanicAttempts(3)), slog.Default().With("worker", "panic-worker"))
+	w := newWorker("panic-worker", h, applyHandlerOptions(config{}, WithMaxPanicAttempts(3)), slog.Default().With("worker", "panic-worker"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 
@@ -252,7 +252,7 @@ func TestWorker_WhenMessageSent_ShouldPassToHandler(t *testing.T) {
 			return None(5 * time.Second)
 		}
 	}}
-	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", h, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -295,7 +295,7 @@ func TestWorker_WhenIdleAndMessageSent_ShouldWakeUpImmediately(t *testing.T) {
 			return None(10 * time.Second)
 		}
 	}}
-	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", h, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(50 * time.Millisecond)
@@ -326,7 +326,7 @@ func TestUnwrapEnvelope_WhenZeroValue_ShouldReturnNilWithoutPanic(t *testing.T) 
 	t.Parallel()
 	// Arrange
 	h := handlerFunc{fn: func(context.Context, any) HandleResult { return Done() }}
-	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", h, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 
 	// Act & Assert
 	require.NotPanics(t, func() {
@@ -339,7 +339,7 @@ func TestUnwrapEnvelope_WhenValid_ShouldCloseDeliveredAndReturnMsg(t *testing.T)
 	t.Parallel()
 	// Arrange
 	h := handlerFunc{fn: func(context.Context, any) HandleResult { return Done() }}
-	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", h, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 	delivered := make(chan struct{})
 	env := envelope{msg: "payload", delivered: delivered}
 
@@ -374,7 +374,7 @@ func TestWorker_WhenNoMessage_ShouldPassNilToHandler(t *testing.T) {
 			return None(15 * time.Millisecond)
 		}
 	}}
-	w := newWorker("w", h, applyHandlerOptions(), slog.Default().With("worker", "w"))
+	w := newWorker("w", h, applyHandlerOptions(config{}), slog.Default().With("worker", "w"))
 	ctx := context.Background()
 	require.NoError(t, w.start(ctx))
 	time.Sleep(80 * time.Millisecond)
@@ -387,4 +387,51 @@ func TestWorker_WhenNoMessage_ShouldPassNilToHandler(t *testing.T) {
 	msgs := append([]any(nil), messages...)
 	mu.Unlock()
 	require.Empty(t, msgs)
+}
+
+func TestWorkerStart_WhenLockOSThreadEnabled_ShouldRunAndStopCleanly(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	h := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult {
+		select {
+		case <-ctx.Done():
+			return None(0)
+		case <-time.After(10 * time.Millisecond):
+			return Done()
+		}
+	}}
+	cfg := applyHandlerOptions(config{}, WithLockOSThread(true))
+	w := newWorker("locked", h, cfg, slog.Default().With("worker", "locked"))
+	ctx := context.Background()
+
+	// Act
+	require.NoError(t, w.start(ctx))
+	time.Sleep(50 * time.Millisecond)
+	<-w.stop()
+
+	// Assert
+	require.Equal(t, StatusStopped, w.getStatus())
+}
+
+func TestWorkerApplyConfig_WhenCalled_ShouldUpdateConfigAndChannels(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	h := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult { return Done() }}
+	origCfg := applyHandlerOptions(config{}, WithMessageBufferSize(1))
+	w := newWorker("w", h, origCfg, slog.Default())
+	origMsgCh := w.msgCh
+	origMetrics := w.metrics
+
+	// Act
+	newCfg := applyHandlerOptions(config{}, WithMessageBufferSize(10), WithLockOSThread(true))
+	w.applyConfig(newCfg, slog.Default())
+
+	// Assert
+	require.Equal(t, 10, w.config.messageBufferSize)
+	require.True(t, w.config.lockOSThread)
+	require.Equal(t, 10, cap(w.msgCh))
+	require.NotEqual(t, fmt.Sprintf("%p", origMsgCh), fmt.Sprintf("%p", w.msgCh), "msgCh should be recreated")
+	require.NotEqual(t, fmt.Sprintf("%p", origMetrics), fmt.Sprintf("%p", w.metrics), "metrics should be recreated")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -100,6 +101,7 @@ func (w *worker) initLogger(logger *slog.Logger) *slog.Logger {
 		"config_panic_backoff", w.config.panicBackoff,
 		"config_message_buffer_size", w.config.messageBufferSize,
 		"config_max_dispatch_timeout", w.config.maxDispatchTimeout,
+		"config_lock_os_thread", w.config.lockOSThread,
 	)
 }
 
@@ -123,6 +125,11 @@ func (w *worker) start(ctx context.Context) error {
 	w.log.Info("starting worker")
 
 	go func() {
+		if w.config.lockOSThread {
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+		}
+
 		defer close(w.done)
 		defer w.setStatus(StatusStopped)
 		defer w.emitStoppedAndCloseMetrics()
@@ -353,6 +360,19 @@ func (w *worker) getMaxDispatchTimeout() time.Duration {
 // getPanicBackoff returns the panic backoff duration (always set by applyHandlerOptions).
 func (w *worker) getPanicBackoff() time.Duration {
 	return w.config.panicBackoff
+}
+
+// applyConfig replaces the worker's configuration with cfg, recreates the message
+// channel and metrics recorder, and reinitializes the logger. The worker must be
+// stopped before calling applyConfig; the caller is responsible for restarting it.
+func (w *worker) applyConfig(cfg config, logger *slog.Logger) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.config = cfg
+	w.msgCh = make(chan envelope, cfg.messageBufferSize)
+	w.metrics = newMetricsRecorder(w.name)
+	w.log = w.initLogger(logger)
 }
 
 // sendEnvelope sends env to the worker's message channel and records the dispatch
