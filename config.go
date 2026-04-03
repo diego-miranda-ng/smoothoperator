@@ -18,11 +18,12 @@ type config struct {
 	messageBufferSize  int
 	maxDispatchTimeout time.Duration
 	messageOnly        bool
+	lockOSThread       bool
 }
 
 // HandlerOption configures a worker at registration time. Use WithMaxPanicAttempts,
-// WithPanicBackoff, WithMessageBufferSize, WithMaxDispatchTimeout, and WithMessageOnly
-// to set optional behavior; zero value applies defaults.
+// WithPanicBackoff, WithMessageBufferSize, WithMaxDispatchTimeout, WithMessageOnly,
+// and WithLockOSThread to set optional behavior; zero value applies defaults.
 type HandlerOption func(*config)
 
 // WithMaxPanicAttempts sets the maximum number of panic recoveries before the worker
@@ -55,23 +56,28 @@ func WithMessageOnly(b bool) HandlerOption {
 	return func(c *config) { c.messageOnly = b }
 }
 
-// applyHandlerOptions applies the given options and returns a config with defaults
-// applied so that messageBufferSize and panicBackoff are never zero when the
-// default behavior is desired. Downstream code can use config fields directly.
-func applyHandlerOptions(opts ...HandlerOption) config {
-	c := config{
-		messageBufferSize: defaultMessageBufferSize,
-		panicBackoff:      defaultPanicBackoff,
-	}
+// WithLockOSThread, when true, pins the worker's goroutine to a dedicated OS
+// thread via runtime.LockOSThread for the lifetime of the run loop. When false
+// (default), the goroutine is scheduled normally by the Go runtime.
+func WithLockOSThread(b bool) HandlerOption {
+	return func(c *config) { c.lockOSThread = b }
+}
+
+// applyHandlerOptions applies the given options on top of base and returns the
+// resulting config with defaults applied so that messageBufferSize and
+// panicBackoff are never zero when the default behavior is desired. When called
+// from AddHandler, pass a zero-value config so defaults kick in. When called
+// from UpdateHandlerOptions, pass the worker's current config so only the
+// supplied options are overridden.
+func applyHandlerOptions(base config, opts ...HandlerOption) config {
 	for _, opt := range opts {
-		opt(&c)
+		opt(&base)
 	}
-	// Normalize so 0 from options means "use default" (avoids conditionals elsewhere).
-	if c.messageBufferSize <= 0 {
-		c.messageBufferSize = defaultMessageBufferSize
+	if base.messageBufferSize <= 0 {
+		base.messageBufferSize = defaultMessageBufferSize
 	}
-	if c.panicBackoff <= 0 {
-		c.panicBackoff = defaultPanicBackoff
+	if base.panicBackoff <= 0 {
+		base.panicBackoff = defaultPanicBackoff
 	}
-	return c
+	return base
 }
