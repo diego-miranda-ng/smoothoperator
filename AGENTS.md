@@ -149,3 +149,32 @@ When adding new functionality:
 5. Write both black-box and white-box tests following the naming and structure conventions above.
 6. Ensure every test calls `t.Parallel()` and uses Arrange/Act/Assert structure.
 7. Add godoc comments (full sentences) to all exported symbols.
+
+## Branch Naming
+
+All branch names must start with a prefix that matches the type of change being made in the branch.
+
+- `fix/` for bug fixes.
+- `feature/` for new features or user-facing enhancements.
+- `upkeep/` for maintenance work such as CI, tooling, dependency, or repository updates.
+- `quality/` for test coverage, reliability, refactoring, observability, or other quality improvements.
+
+After the prefix, use a short snake_case description of the work. Examples:
+
+- `fix/dispatch_timeout_error_wrapping`
+- `feature/worker_metrics_streaming`
+- `upkeep/github_actions_updates`
+- `quality/improve_operator_test_coverage`
+
+## Pull Request Templates
+
+Every pull request must use the correct template for the type of change being proposed and must fully complete that template before the pull request is opened or marked ready for review.
+
+Use the template that matches the branch purpose:
+
+- `fix.md` for `fix/` branches.
+- `feature.md` for `feature/` branches.
+- `upkeep.md` for `upkeep/` branches.
+- `quality.md` for `quality/` branches.
+
+The selected pull request template must be filled out completely, including the summary, validation or test details, documentation impact, and any relevant risk, compatibility, or follow-up sections.
