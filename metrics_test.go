@@ -10,6 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func collectMetrics[T any](ch <-chan T) []T {
+	var got []T
+	for ev := range ch {
+		got = append(got, ev)
+	}
+	return got
+}
+
 func TestMetricsRecorder_HandleMetrics_WhenChannelCreated_ReceivesHandleEvents(t *testing.T) {
 	t.Parallel()
 
@@ -21,20 +29,12 @@ func TestMetricsRecorder_HandleMetrics_WhenChannelCreated_ReceivesHandleEvents(t
 	require.NoError(t, err)
 
 	ch := w.Metrics().HandleMetrics(10)
-	var got []smoothoperator.HandleMetricEvent
-	done := make(chan struct{})
-	go func() {
-		for ev := range ch {
-			got = append(got, ev)
-		}
-		close(done)
-	}()
 
 	// Act
 	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(30 * time.Millisecond)
 	<-op.StopAll()
-	<-done
+	got := collectMetrics(ch)
 
 	// Assert
 	require.NotEmpty(t, got)
@@ -53,20 +53,12 @@ func TestMetricsRecorder_LifecycleMetrics_WhenChannelCreated_ReceivesLifecycleEv
 	require.NoError(t, err)
 
 	ch := w.Metrics().LifecycleMetrics(10)
-	var got []smoothoperator.LifecycleMetricEvent
-	done := make(chan struct{})
-	go func() {
-		for ev := range ch {
-			got = append(got, ev)
-		}
-		close(done)
-	}()
 
 	// Act
 	require.NoError(t, op.Start("worker-test"))
 	time.Sleep(30 * time.Millisecond)
 	<-op.StopAll()
-	<-done
+	got := collectMetrics(ch)
 
 	// Assert
 	require.GreaterOrEqual(t, len(got), 2)
@@ -89,4 +81,162 @@ func TestMetricsRecorder_HandleMetrics_WithZeroBufferSize_CreatesChannel(t *test
 
 	// Assert
 	require.NotNil(t, ch)
+}
+
+func TestMetricsRecorder_PanicMetrics_WhenChannelCreated_ReceivesPanicEvents(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	w, err := op.AddHandler(
+		"worker-test",
+		internal.PanicHandler(),
+		smoothoperator.WithMaxPanicAttempts(1),
+	)
+	require.NoError(t, err)
+
+	ch := w.Metrics().PanicMetrics(10)
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(30 * time.Millisecond)
+	<-op.StopAll()
+	got := collectMetrics(ch)
+
+	// Assert
+	require.NotEmpty(t, got)
+	require.Equal(t, 1, got[0].Attempt)
+	require.Equal(t, "worker-test", got[0].Worker)
+	require.Contains(t, got[0].Err, "test panic")
+}
+
+func TestMetricsRecorder_DispatchMetrics_WhenChannelCreated_ReceivesDispatchEvents(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	recordingHandler, _ := internal.NewRecordingHandler(5 * time.Second)
+	w, err := op.AddHandler("worker-test", recordingHandler, smoothoperator.WithMessageOnly(true))
+	require.NoError(t, err)
+
+	ch := w.Metrics().DispatchMetrics(10)
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
+	delivered, _, err := op.Dispatch(context.Background(), "worker-test", "hello")
+	require.NoError(t, err)
+	<-delivered
+	<-op.StopAll()
+	got := collectMetrics(ch)
+
+	// Assert
+	require.NotEmpty(t, got)
+	require.True(t, got[0].Ok)
+	require.Equal(t, "worker-test", got[0].Worker)
+	require.Empty(t, got[0].Error)
+}
+
+func TestMetricsRecorder_HandleMetrics_WhenEventsExceedBufferSize_ShouldDropExtraEvents(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	w, err := op.AddHandler("worker-test", internal.NoneZeroHandler())
+	require.NoError(t, err)
+
+	ch := w.Metrics().HandleMetrics(1)
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(30 * time.Millisecond)
+	<-op.StopAll()
+	got := collectMetrics(ch)
+
+	// Assert
+	require.Len(t, got, 1)
+	require.Equal(t, smoothoperator.HandleStatusNone, got[0].Status)
+	require.Equal(t, "worker-test", got[0].Worker)
+}
+
+func TestMetricsRecorder_PanicMetrics_WhenEventsExceedBufferSize_ShouldDropExtraEvents(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	w, err := op.AddHandler(
+		"worker-test",
+		internal.PanicHandler(),
+		smoothoperator.WithMaxPanicAttempts(3),
+		smoothoperator.WithPanicBackoff(time.Millisecond),
+	)
+	require.NoError(t, err)
+
+	ch := w.Metrics().PanicMetrics(1)
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(30 * time.Millisecond)
+	<-op.StopAll()
+	got := collectMetrics(ch)
+
+	// Assert
+	require.Len(t, got, 1)
+	require.Equal(t, 1, got[0].Attempt)
+	require.Equal(t, "worker-test", got[0].Worker)
+	require.Contains(t, got[0].Err, "test panic")
+}
+
+func TestMetricsRecorder_DispatchMetrics_WhenEventsExceedBufferSize_ShouldDropExtraEvents(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	w, err := op.AddHandler(
+		"worker-test",
+		internal.BlockingHandler(100*time.Millisecond),
+		smoothoperator.WithMessageOnly(true),
+		smoothoperator.WithMessageBufferSize(3),
+	)
+	require.NoError(t, err)
+
+	ch := w.Metrics().DispatchMetrics(1)
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "first")
+	require.NoError(t, err)
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "second")
+	require.NoError(t, err)
+	_, _, err = op.Dispatch(context.Background(), "worker-test", "third")
+	require.NoError(t, err)
+	<-op.StopAll()
+	got := collectMetrics(ch)
+
+	// Assert
+	require.Len(t, got, 1)
+	require.True(t, got[0].Ok)
+	require.Equal(t, "worker-test", got[0].Worker)
+	require.Empty(t, got[0].Error)
+}
+
+func TestMetricsRecorder_LifecycleMetrics_WhenEventsExceedBufferSize_ShouldDropExtraEvents(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	w, err := op.AddHandler("worker-test", internal.NoneZeroHandler())
+	require.NoError(t, err)
+
+	ch := w.Metrics().LifecycleMetrics(1)
+
+	// Act
+	require.NoError(t, op.Start("worker-test"))
+	time.Sleep(30 * time.Millisecond)
+	<-op.StopAll()
+	got := collectMetrics(ch)
+
+	// Assert
+	require.Len(t, got, 1)
+	require.Equal(t, "started", got[0].Event)
+	require.Equal(t, "worker-test", got[0].Worker)
 }
