@@ -112,13 +112,17 @@ func NewOperator(ctx context.Context, opts ...Option) Operator {
 // AddHandler registers a handler under name with the given options. The worker
 // is created in StatusStopped; call Start or StartAll to run it. If the handler
 // implements DispatcherAware, SetDispatcher is called with the operator before
-// returning. Returns ErrWorkerAlreadyExists if name is already registered.
+// returning. Returns ErrWorkerAlreadyExists if name is already registered and
+// ErrNilHandler if handler is nil.
 func (op *operator) AddHandler(name string, handler Handler, opts ...HandlerOption) (Worker, error) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
 
 	if _, ok := op.workers[name]; ok {
 		return nil, op.errorHandler(fmt.Errorf("worker %s already exists: %w", name, ErrWorkerAlreadyExists))
+	}
+	if handler == nil {
+		return nil, op.errorHandler(fmt.Errorf("worker %s has nil handler: %w", name, ErrNilHandler))
 	}
 
 	cfg := applyHandlerOptions(config{}, opts...)
@@ -229,9 +233,9 @@ func (op *operator) Worker(name string) (Worker, error) {
 	return w, nil
 }
 
-// Start launches the named worker's goroutine. If the worker is already running,
-// this is a no-op and returns nil. Returns ErrWorkerNotFound if name is not
-// registered.
+// Start launches the named worker's goroutine. Returns ErrWorkerNotFound if
+// name is not registered and ErrWorkerAlreadyRunning if the worker is already
+// running.
 func (op *operator) Start(name string) error {
 	w, err := op.getWorker(name)
 	if err != nil {

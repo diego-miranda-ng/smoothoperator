@@ -78,6 +78,22 @@ func TestAddHandler_WhenDuplicateName_ShouldReturnError(t *testing.T) {
 	require.Contains(t, err.Error(), "already exists")
 }
 
+func TestAddHandler_WhenHandlerIsNil_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+
+	// Act
+	w, err := op.AddHandler("worker-test", nil)
+
+	// Assert
+	require.Error(t, err)
+	require.Nil(t, w)
+	require.True(t, errors.Is(err, smoothoperator.ErrNilHandler), "err should be ErrNilHandler")
+	require.Contains(t, err.Error(), "nil handler")
+}
+
 func TestStart_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +105,26 @@ func TestStart_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
+}
+
+func TestStart_WhenWorkerAlreadyRunning_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("worker-test", internal.QuickHandler())
+	require.NoError(t, err)
+	require.NoError(t, op.Start("worker-test"))
+
+	// Act
+	err = op.Start("worker-test")
+
+	// Assert
+	require.Error(t, err)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerAlreadyRunning), "err should be ErrWorkerAlreadyRunning")
+	require.Contains(t, err.Error(), "already running")
+
+	<-op.StopAll()
 }
 
 func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
@@ -118,6 +154,26 @@ func TestStartAll_WhenWorkersAdded_ShouldStartAllWorkers(t *testing.T) {
 	<-op.StopAll()
 }
 
+func TestStartAll_WhenWorkerAlreadyRunning_ShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	_, err := op.AddHandler("worker-test", internal.QuickHandler())
+	require.NoError(t, err)
+	require.NoError(t, op.Start("worker-test"))
+
+	// Act
+	err = op.StartAll()
+
+	// Assert
+	require.Error(t, err)
+	require.True(t, errors.Is(err, smoothoperator.ErrWorkerAlreadyRunning), "err should be ErrWorkerAlreadyRunning")
+	require.Contains(t, err.Error(), "already running")
+
+	<-op.StopAll()
+}
+
 func TestStop_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
 
@@ -132,25 +188,6 @@ func TestStop_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Nil(t, ch)
 	require.True(t, errors.Is(err, smoothoperator.ErrWorkerNotFound), "err should be ErrWorkerNotFound")
 	require.Contains(t, err.Error(), "not found")
-}
-
-func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
-	t.Parallel()
-
-	// Arrange
-	op := smoothoperator.NewOperator(context.Background())
-	_, err := op.AddHandler("worker-test", internal.QuickHandler())
-	require.NoError(t, err)
-	require.NoError(t, op.Start("worker-test"))
-
-	// Act: second start is no-op
-	require.NoError(t, op.Start("worker-test"))
-	<-op.StopAll()
-
-	// Assert
-	status, err := op.Status("worker-test")
-	require.NoError(t, err)
-	require.Equal(t, smoothoperator.StatusStopped, status)
 }
 
 func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testing.T) {
@@ -502,7 +539,24 @@ func TestStatus_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 }
 
-// --- Dispatch / SendMessage tests ---
+func TestWorker_WhenWorkerExists_ShouldReturnWorker(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	op := smoothoperator.NewOperator(context.Background())
+	addedWorker, err := op.AddHandler("worker-test", internal.QuickHandler())
+	require.NoError(t, err)
+
+	// Act
+	gotWorker, err := op.Worker("worker-test")
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, gotWorker)
+	require.Equal(t, addedWorker, gotWorker)
+	require.Equal(t, "worker-test", gotWorker.Name())
+	require.Equal(t, smoothoperator.StatusStopped, gotWorker.Status())
+}
 
 func TestDispatch_WhenWorkerNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()
@@ -912,8 +966,6 @@ func TestMessageOnly_WhenMultipleMessagesSent_ShouldDeliverAllInOrder(t *testing
 	require.Equal(t, "msg-1", msgs[1])
 	require.Equal(t, "msg-2", msgs[2])
 }
-
-// --- Metrics tests ---
 
 func TestWorker_WhenNotFound_ShouldReturnError(t *testing.T) {
 	t.Parallel()

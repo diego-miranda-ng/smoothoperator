@@ -106,13 +106,13 @@ func (w *worker) initLogger(logger *slog.Logger) *slog.Logger {
 }
 
 // start starts the worker loop in a new goroutine. The loop runs until ctx is
-// cancelled (e.g. by calling stop). Idempotent: if the worker is already
-// running, start returns nil without starting a second loop.
+// cancelled (e.g. by calling stop). Returns ErrWorkerAlreadyRunning when the
+// worker is already running.
 func (w *worker) start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.status == StatusRunning {
 		w.mu.Unlock()
-		return nil
+		return fmt.Errorf("worker %s is already running: %w", w.name, ErrWorkerAlreadyRunning)
 	}
 
 	workerCtx, cancel := context.WithCancel(ctx)
