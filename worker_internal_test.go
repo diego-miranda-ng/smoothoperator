@@ -24,7 +24,7 @@ func (h handlerFunc) Handle(ctx context.Context, msg any) HandleResult {
 	return h.fn(ctx, msg)
 }
 
-func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
+func TestWorkerStart_WhenAlreadyRunning_ShouldReturnErrWorkerAlreadyRunning(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -41,11 +41,11 @@ func TestWorkerStart_WhenAlreadyRunning_ShouldBeNoOp(t *testing.T) {
 
 	// Act
 	require.NoError(t, w.start(ctx))
-	require.NoError(t, w.start(ctx))
-	<-w.stop()
+	err := w.start(ctx)
 
 	// Assert
-	require.Equal(t, StatusStopped, w.getStatus())
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrWorkerAlreadyRunning)
 }
 
 func TestWorkerStop_WhenNotStarted_ShouldReturnClosedChannelImmediately(t *testing.T) {
@@ -75,6 +75,34 @@ func TestWorker_WhenCreated_ShouldReturnNameAndStoppedStatus(t *testing.T) {
 
 	// Assert
 	require.Equal(t, "my-name", name)
+	require.Equal(t, StatusStopped, status)
+}
+
+func TestWorker_Name_WhenCalled_ShouldReturnWorkerName(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	h := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult { return Done() }}
+	w := newWorker("my-name", h, applyHandlerOptions(config{}), slog.Default().With("worker", "my-name"))
+
+	// Act
+	name := w.Name()
+
+	// Assert
+	require.Equal(t, "my-name", name)
+}
+
+func TestWorker_Status_WhenCalled_ShouldReturnWorkerStatus(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	h := handlerFunc{fn: func(ctx context.Context, msg any) HandleResult { return Done() }}
+	w := newWorker("worker-status", h, applyHandlerOptions(config{}), slog.Default().With("worker", "worker-status"))
+
+	// Act
+	status := w.Status()
+
+	// Assert
 	require.Equal(t, StatusStopped, status)
 }
 
