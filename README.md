@@ -84,7 +84,9 @@ Options passed to `AddHandler` to configure per-worker behavior:
 
 ## Documentation
 
-For the full API reference, all types, and detailed copy-paste examples see **[DOCUMENTATION.md](DOCUMENTATION.md)**.
+For the full API reference, all types, and detailed copy-paste examples see **[the wiki](https://github.com/diego-miranda-ng/smoothoperator/wiki)**.
+
+> **Note:** The GitHub Wiki must be enabled in the repository settings, and at least one page must be created manually via the GitHub UI to initialize the wiki repository before the automated sync action can work.
 
 You can also browse with `go doc`:
 

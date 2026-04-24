@@ -166,6 +166,15 @@ After the prefix, use a short snake_case description of the work. Examples:
 - `upkeep/github_actions_updates`
 - `quality/improve_operator_test_coverage`
 
+## Wiki Sync
+
+The project uses a GitHub Action (`.github/workflows/wiki-sync.yml`) to sync documentation from the `wiki/` directory to the repository's GitHub Wiki.
+
+**Initial Setup Requirement:**
+The GitHub Wiki repository must be initialized before the sync action can succeed. This requires:
+1. Enabling "Wikis" in the repository settings.
+2. Manually creating at least one page (e.g., a Home page) through the GitHub web interface. This creates the underlying `.wiki.git` repository that the Action pushes to.
+
 ## Pull Request Templates
 
 Every pull request must use the correct template for the type of change being proposed and must fully complete that template before the pull request is opened or marked ready for review.
