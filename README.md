@@ -84,7 +84,7 @@ Options passed to `AddHandler` to configure per-worker behavior:
 
 ## Documentation
 
-For the full API reference, all types, and detailed copy-paste examples see **[DOCUMENTATION.md](DOCUMENTATION.md)**.
+For the full API reference, all types, and detailed copy-paste examples see **[the wiki](https://github.com/diego-miranda-ng/smoothoperator/wiki)**.
 
 You can also browse with `go doc`:
 
