@@ -239,6 +239,8 @@ func (w *worker) handle(ctx context.Context) {
 
 	if (result.Status == HandleStatusNone || result.Status == HandleStatusFail) && result.IdleDuration > 0 {
 		w.log.Debug("entering idle", "duration", result.IdleDuration, "status", result.Status, "had_message", hadMessage)
+		timer := time.NewTimer(result.IdleDuration)
+		defer timer.Stop()
 		select {
 		case <-ctx.Done():
 			w.log.Debug("idle interrupted by context cancellation", "reason", ctx.Err())
@@ -246,7 +248,7 @@ func (w *worker) handle(ctx context.Context) {
 		case raw := <-w.msgCh:
 			w.log.Debug("idle interrupted by incoming message", "message", raw.msg)
 			result = w.runHandle(ctx, raw, true)
-		case <-time.After(result.IdleDuration):
+		case <-timer.C:
 			w.log.Debug("idle period elapsed", "duration", result.IdleDuration)
 		}
 	}
@@ -308,9 +310,11 @@ func (w *worker) onPanicRecovered(ctx context.Context) {
 	backoff := w.getPanicBackoff()
 	w.log.Info("backing off after panic", "duration", backoff, "attempt", w.panicCount)
 	w.mu.Unlock()
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-	case <-time.After(backoff):
+	case <-timer.C:
 	}
 	w.mu.Lock()
 }
