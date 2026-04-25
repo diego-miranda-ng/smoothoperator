@@ -253,14 +253,7 @@ func (op *operator) Start(name string) error {
 // returns an error, it is returned immediately and remaining workers are not
 // started.
 func (op *operator) StartAll() error {
-	op.mu.RLock()
-	names := make([]string, 0, len(op.workers))
-	for name := range op.workers {
-		names = append(names, name)
-	}
-	op.mu.RUnlock()
-
-	for _, name := range names {
+	for _, name := range op.getWorkerNames() {
 		if err := op.Start(name); err != nil {
 			return op.errorHandler(err)
 		}
@@ -285,14 +278,7 @@ func (op *operator) Stop(name string) (chan struct{}, error) {
 // StopAll stops every registered worker and waits for each goroutine to exit
 // sequentially. Returns a closed channel once all workers have stopped.
 func (op *operator) StopAll() chan struct{} {
-	op.mu.RLock()
-	names := make([]string, 0, len(op.workers))
-	for name := range op.workers {
-		names = append(names, name)
-	}
-	op.mu.RUnlock()
-
-	for _, name := range names {
+	for _, name := range op.getWorkerNames() {
 		if stopChan, _ := op.Stop(name); stopChan != nil {
 			<-stopChan
 		}
@@ -301,6 +287,19 @@ func (op *operator) StopAll() chan struct{} {
 	stopped := make(chan struct{})
 	close(stopped)
 	return stopped
+}
+
+// getWorkerNames returns a slice containing the names of all registered workers.
+// Safe for concurrent use.
+func (op *operator) getWorkerNames() []string {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
+
+	names := make([]string, 0, len(op.workers))
+	for name := range op.workers {
+		names = append(names, name)
+	}
+	return names
 }
 
 // getWorker returns the worker with the given name, or nil and an error if not found.
