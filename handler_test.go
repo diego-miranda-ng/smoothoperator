@@ -36,6 +36,17 @@ func TestNone_WithZeroDuration_ReturnsIdleZero(t *testing.T) {
 	require.Equal(t, time.Duration(0), result.IdleDuration)
 }
 
+func TestNone_WithNegativeDuration_ReturnsIdleZero(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	result := smoothoperator.None(-1 * time.Second)
+
+	// Assert
+	require.Equal(t, smoothoperator.HandleStatusNone, result.Status)
+	require.Equal(t, time.Duration(0), result.IdleDuration)
+}
+
 func TestDone_ReturnsHandleResultWithStatusDone(t *testing.T) {
 	t.Parallel()
 
