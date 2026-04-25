@@ -463,3 +463,24 @@ func TestWorkerApplyConfig_WhenCalled_ShouldUpdateConfigAndChannels(t *testing.T
 	require.NotEqual(t, fmt.Sprintf("%p", origMsgCh), fmt.Sprintf("%p", w.msgCh), "msgCh should be recreated")
 	require.NotEqual(t, fmt.Sprintf("%p", origMetrics), fmt.Sprintf("%p", w.metrics), "metrics should be recreated")
 }
+
+func TestWorker_ProcessEnvelope_WhenContextClosed_ShouldReturn(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h := handlerFunc{fn: func(c context.Context, msg any) HandleResult {
+		<-c.Done()
+		return Done()
+	}}
+	w := newWorker("process-env", h, applyHandlerOptions(config{}), slog.Default().With("worker", "process-env"))
+	env := envelope{msg: "test-msg"}
+
+	// Act
+	cancel() // Cancel context immediately so the handler unblocks
+	result := w.processEnvelope(ctx, env)
+
+	// Assert
+	require.Equal(t, HandleStatusDone, result.Status)
+}
