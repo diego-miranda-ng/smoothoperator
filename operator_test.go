@@ -1216,3 +1216,37 @@ func TestUpdateHandlerOptions_WhenMultipleOptionsChanged_ShouldApplyAll(t *testi
 	require.Equal(t, "5", rec.Attrs["config_message_buffer_size"], "expected config_message_buffer_size=5")
 	require.Equal(t, "10", rec.Attrs["config_max_panic_attempts"], "expected config_max_panic_attempts=10")
 }
+
+func TestAddHandler_WithInvalidOptions_ShouldNormalizeToDefaults(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: use capture handler to inspect the worker's resolved config
+	capture := newCaptureHandler()
+	logger := slog.New(capture)
+	op := smoothoperator.NewOperator(context.Background(), smoothoperator.WithLogger(logger))
+
+	// Act: AddHandler with invalid negative options
+	_, err := op.AddHandler("worker-test", internal.QuickHandler(),
+		smoothoperator.WithMessageBufferSize(-5),
+		smoothoperator.WithPanicBackoff(-10*time.Second),
+	)
+
+	// Assert: No error from AddHandler, defaults should be applied
+	require.NoError(t, err)
+
+	// Verify defaults via the log output
+	workerRecords := capture.findByMessage("handler added")
+	require.NotEmpty(t, workerRecords, "expected 'handler added' log")
+
+	// We can also start it to trigger the "starting worker" log which prints all config attrs
+	require.NoError(t, op.Start("worker-test"))
+
+	startRecords := capture.findByMessage("starting worker")
+	require.NotEmpty(t, startRecords, "expected 'starting worker' log")
+
+	rec := startRecords[0]
+	require.Equal(t, "1", rec.Attrs["config_message_buffer_size"], "expected config_message_buffer_size to be normalized to default 1")
+	require.Equal(t, "1s", rec.Attrs["config_panic_backoff"], "expected config_panic_backoff to be normalized to default 1s")
+
+	<-op.StopAll()
+}
