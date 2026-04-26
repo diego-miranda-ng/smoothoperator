@@ -41,6 +41,9 @@ type HandleResult struct {
 // sleeps for idle before the next Handle call. Use zero duration to poll
 // without sleeping.
 func None(idle time.Duration) HandleResult {
+	if idle < 0 {
+		idle = 0
+	}
 	return HandleResult{Status: HandleStatusNone, IdleDuration: idle}
 }
 
